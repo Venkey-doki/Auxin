@@ -141,10 +141,29 @@ fn check_port(port: u16) -> bool {
     })
 }
 
+/// The app identifier before `io.github.venkey-doki.auxin`. The config folder is named
+/// after the identifier, so settings saved under the old one are copied over once.
+const OLD_IDENTIFIER: &str = "com.auxin.app";
+
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("auxin.json"))
+    let path = dir.join("auxin.json");
+    adopt_old_config(&path);
+    Ok(path)
+}
+
+/// Copies `auxin.json` from the old identifier's folder (a sibling of the new one on
+/// every OS) when there's no config yet. A copy, so an older Auxin still finds its own.
+fn adopt_old_config(path: &std::path::Path) {
+    if path.exists() {
+        return;
+    }
+    let Some(old) = path.parent().and_then(|d| d.parent()).map(|p| p.join(OLD_IDENTIFIER).join("auxin.json")) else { return };
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::copy(&old, &tmp).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
 }
 
 #[tauri::command]
@@ -229,4 +248,38 @@ pub fn run() {
             handle.state::<Arc<Manager>>().shutdown_all();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_from_the_old_identifier_are_copied_once() {
+        let base = tempfile::tempdir().unwrap();
+        let old = base.path().join(OLD_IDENTIFIER);
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("auxin.json"), r#"{"version":1}"#).unwrap();
+        let new_dir = base.path().join("io.github.venkey-doki.auxin");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let path = new_dir.join("auxin.json");
+
+        adopt_old_config(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"version":1}"#);
+        assert!(old.join("auxin.json").exists(), "the old file stays for older versions");
+
+        // Once there's a config of its own, the old one is never copied over it.
+        std::fs::write(&path, r#"{"version":1,"newer":true}"#).unwrap();
+        adopt_old_config(&path);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"version":1,"newer":true}"#);
+    }
+
+    #[test]
+    fn no_old_settings_means_a_fresh_start() {
+        let base = tempfile::tempdir().unwrap();
+        let path = base.path().join("io.github.venkey-doki.auxin/auxin.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        adopt_old_config(&path);
+        assert!(!path.exists());
+    }
 }

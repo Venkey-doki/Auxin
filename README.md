@@ -39,7 +39,7 @@ AUXIN_SCAN_ROOT=~/code cargo test scan_prints -- --nocapture --ignored   # print
 
 - `src-tauri/src/scan.rs`: service detection and command suggestions
 - `src-tauri/src/process.rs`: spawning, process groups, batched log streaming, login-shell env capture
-- `src-tauri/src/lib.rs`: Tauri commands, config persistence (`~/Library/Application Support/com.auxin.app/auxin.json`), shutdown on exit
+- `src-tauri/src/lib.rs`: Tauri commands, config persistence (`~/Library/Application Support/io.github.venkey-doki.auxin/auxin.json`; copied once from the old `com.auxin.app` folder), shutdown on exit
 - `src-tauri/src/http.rs`: HTTP client for flows (reqwest; cancel, cookie jars, large bodies)
 - `src-tauri/src/workspace_files.rs`: the workspace's `.auxin/` folder (atomic writes, watcher, `.gitignore` upkeep)
 - `src-tauri/src/deps.rs`, `conns.rs`: call-direction detection (static scan; `lsof` connection sampling)

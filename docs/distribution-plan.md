@@ -114,7 +114,7 @@ Pages:
 - [ ] `README.md` with a screenshot, what it does, install links, how to build from source.
 - [ ] `CONTRIBUTING.md`, `SECURITY.md` (Auxin runs commands and handles secrets, so say how to report a vulnerability privately), `CODE_OF_CONDUCT.md`, issue and PR templates, `CHANGELOG.md`.
 - [ ] Scan the whole git history for secrets (gitleaks) and fix anything found before publishing.
-- [ ] Change the bundle identifier `com.auxin.app` (`src-tauri/tauri.conf.json`). Tauri warns against identifiers ending in `.app`, and changing it after release moves where the app keeps its settings, so users would lose them. Something like `io.github.<user>.auxin`.
+- [x] Change the bundle identifier `com.auxin.app` (`src-tauri/tauri.conf.json`); now `io.github.venkey-doki.auxin`, with settings copied over once from the old folder. Tauri warns against identifiers ending in `.app`, and changing it after release moves where the app keeps its settings, so users would lose them. Something like `io.github.<user>.auxin`.
 - [ ] Check the name: search for other developer tools called Auxin.
 - [ ] Choose the Vercel project name; it becomes the site address and the install-script URL, so treat it as permanent.
 
@@ -138,4 +138,3 @@ Later: SignPath signing for Windows, an opt-in update check, winget and Flathub.
 - Licence.
 - Vercel project name (the permanent address).
 - macOS: one universal `.dmg` (bigger download, one button) or separate Apple Silicon and Intel files.
-- The new bundle identifier.
