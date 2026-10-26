@@ -66,9 +66,10 @@ It must work for any project:
   - `{ "json": … }`
   - `{ "text": "…" }`
   - `{ "form": { … } }` (url-encoded)
-  - `{ "file": "relative/path" }`: relative to the workspace. A file outside it (absolute path, `..`, or a symlink out) is refused, because flow files can come from someone else's repo.
+  - `{ "file": "relative/path" }`: relative to the workspace. A file outside it (absolute path, `..`, or a symlink out) is refused, because flow files can come from someone else's repo. So are files that hold secrets or git data, wherever they are in the workspace: `.env` and `.env.*`, anything under `.git`, `.ssh` or `.auxin/env`, and `*.secret.json`.
   - `null`
 - `headers` is an ordered object. Duplicate header names are not supported in v1.
+- Fields this version doesn't know are kept as they are when Auxin saves the file: on the flow, on a step or block, and inside a step's `http`, `http.body`, `wait` and `queue`.
 - A step can also have:
   - `retry: { "max": 1–5, "backoffMs": 500, "on": "errors" | "any" }`: re-send after a pause that doubles each time (±20% jitter, capped at 30 s). `errors` covers no response (refused, timed out) and 5xx; `any` also covers failed checks and a poll that never matched.
   - `onFailure: "continue"`: the flow keeps going after this step fails (the run is still marked failed). The default is to stop.
@@ -101,6 +102,7 @@ It must work for any project:
 - `destination` is a RabbitMQ exchange (`""` is the default exchange: the routing key is then the queue name) or a Kafka topic. RabbitMQ uses `routingKey` (for consume, the binding pattern; `#` takes everything); Kafka publish can set a message `key`.
 - Publish adds `X-Request-ID` and `traceparent` headers, like a request.
 - **Consume never takes messages from your services.** On RabbitMQ it listens through its own temporary queue bound to the exchange; on Kafka it reads each partition from the newest offset without a consumer group. A message sent straight to a queue (default exchange) can't be watched this way.
+- Network rules (§2.2) are checked on the broker address in `url`. Kafka then connects to each partition's leader at the address the cluster advertises, and those addresses aren't checked.
 - In a run, every consume step starts listening when the run starts, so a message caused by an earlier step isn't missed. The step then waits up to `timeoutMs` for the first message that passes its `checks` (paths `body…` and `header.<name>`), and can `extract` from it. With `matchRun`, only messages carrying a trace or request id from this run count (the ids are checked on each read, so they include every step that ran before), which needs your services to pass those headers on.
 - An if block right after a consume step reads the message it received.
 
@@ -212,9 +214,9 @@ While a flow runs, Auxin runs `lsof -a -p <pid> -iTCP -sTCP:ESTABLISHED -n -P` e
 
 ### 5.0 OpenTelemetry spans (when services send them)
 
-Auxin has a built-in OTLP/HTTP trace receiver on `127.0.0.1:4318` (traces only; metrics and logs are accepted and dropped). If another program already has 4318 (say your own Jaeger or collector), it uses `4319`, and only services Auxin starts reach it.
+Auxin has a built-in OTLP/HTTP trace receiver on `127.0.0.1:4318` (traces only; metrics and logs are accepted and dropped). It takes `application/x-protobuf` and `application/json` bodies only, and refuses any request with an `Origin` header, so a web page in your browser can't post spans to it. If another program already has 4318 (say your own Jaeger or collector), it uses `4319`, and only services Auxin starts reach it.
 
-- **No code change for services that already use an OpenTelemetry SDK.** Auxin detects one from the service's dependencies (`@opentelemetry/*`, `opentelemetry` in Python requirements, `go.opentelemetry.io`, `io.opentelemetry`, .NET `OpenTelemetry`). When it starts such a service it sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:<port>`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` and `OTEL_SERVICE_NAME=<service name>`; anything the service sets itself wins. A per-service switch (*Send OpenTelemetry traces to Auxin*) turns this on or off; it can also be turned on for a service Auxin didn't detect.
+- **No code change for services that already use an OpenTelemetry SDK.** Auxin detects one from the service's dependencies (`@opentelemetry/*`, `opentelemetry` in Python requirements, `go.opentelemetry.io`, `io.opentelemetry`, .NET `OpenTelemetry`). When it starts such a service it sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:<port>`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` and `OTEL_SERVICE_NAME=<service name>`; variables set on the service in Auxin win. Most `.env` loaders (dotenv, python-dotenv) leave variables that are already set alone, so Auxin's would win over the `.env`. To avoid that, Auxin reads the service's `.env`, `.env.local` and `.env.development`: a service whose file sets `OTEL_EXPORTER_OTLP_ENDPOINT` (or `…_TRACES_ENDPOINT`) starts with the switch off, and an `OTEL_SERVICE_NAME` there is passed on unchanged and used to match its spans. A per-service switch (*Send OpenTelemetry traces to Auxin*) turns this on or off; it can also be turned on for a service Auxin didn't detect.
 - Each request (and each published message) already carries a `traceparent`, so an instrumented service continues that trace. After the grace period, Auxin asks the receiver for the step's trace **and traces linked to it** (a queue consumer's span links back to the producer's), and shows them as a waterfall under the step. Their hops replace the log-line hops on the map, with measured timings.
 - Links the spans prove (a parent span in one service, a child in another; a consumer linked to a producer) go to the project map as *Seen in OpenTelemetry spans*.
 - Services without an SDK still show up through log lines (§5.1–5.4), marked approximate. Adding zero-code instrumentation (`NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register`, `opentelemetry-instrument python …`) is a change to the start command you make yourself.

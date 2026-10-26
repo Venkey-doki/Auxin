@@ -100,6 +100,8 @@ export interface FlowStep {
   queue: QueueSpec | null;
   /** Fields this version doesn't know, preserved. */
   rest: Record<string, unknown>;
+  /** The same, inside `http`, its `body`, `wait` and `queue`. */
+  restIn?: Partial<Record<"http" | "body" | "wait" | "queue", Record<string, unknown>>>;
 }
 
 /** Runs `then` when every condition holds on the previous response, `else` otherwise. */
@@ -327,6 +329,24 @@ const toObject = (rows: KV[]): Record<string, string> => {
 
 const pick = (o: Record<string, unknown>, skip: string[]) => Object.fromEntries(Object.entries(o).filter(([k]) => !skip.includes(k)));
 
+const asObject = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
+
+/** Unknown keys of each nested object, leaving out empty ones. */
+function restOf(parts: [key: "http" | "body" | "wait" | "queue", value: unknown, known: string[]][]): Pick<FlowStep, "restIn"> {
+  const out: NonNullable<FlowStep["restIn"]> = {};
+  for (const [key, value, known] of parts) {
+    const o = asObject(value);
+    const extra = o ? pick(o, known) : {};
+    if (Object.keys(extra).length) out[key] = extra;
+  }
+  return Object.keys(out).length ? { restIn: out } : {};
+}
+
+const HTTP_KEYS = ["method", "url", "headers", "body", "timeoutMs"];
+const BODY_KEYS = ["json", "jsonText", "text", "form", "file"];
+const WAIT_KEYS = ["until", "everyMs", "maxTries"];
+const QUEUE_KEYS = ["broker", "destination", "routingKey", "key", "headers", "body", "matchRun", "timeoutMs"];
+
 function parseBody(b: unknown): StepBody {
   const body = emptyBody();
   if (!b || typeof b !== "object") return body;
@@ -448,6 +468,12 @@ function parseHttp(step: Record<string, unknown>): FlowStep {
     onFailure: step.onFailure === "continue" ? "continue" : "stop",
     queue: null,
     rest: pick(step, STEP_KEYS),
+    // v1 steps keep the request on the step, so their unknown fields are already in `rest`.
+    ...restOf([
+      ["http", req === step ? null : req, HTTP_KEYS],
+      ["body", s.body, BODY_KEYS],
+      ["wait", s.poll, WAIT_KEYS],
+    ]),
   };
 }
 
@@ -472,6 +498,7 @@ function parseQueue(step: Record<string, unknown>, type: "queue.publish" | "queu
       timeoutMs: typeof q.timeoutMs === "number" ? q.timeoutMs : 15_000,
     },
     rest: pick(step, STEP_KEYS),
+    ...restOf([["queue", q, QUEUE_KEYS]]),
   };
 }
 
@@ -491,6 +518,7 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
           destination: q.destination,
           ...(q.routingKey ? { routingKey: q.routingKey } : {}),
           ...(s.type === "queue.publish" ? { ...(q.key ? { key: q.key } : {}), headers: toObject(q.headers), body: q.body } : { matchRun: q.matchRun, timeoutMs: q.timeoutMs }),
+          ...s.restIn?.queue,
         },
         ...(s.type === "queue.consume" ? { extract: toObject(s.extract), checks: s.checks.filter((c) => c.left.trim()).map(checkOut) } : {}),
         ...(s.onFailure === "continue" ? { onFailure: "continue" } : {}),
@@ -508,10 +536,17 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
       id: s.id,
       type: "http",
       name: s.name,
-      http: { method: s.method, url: s.url, headers: toObject(s.headers), body: body.value, timeoutMs: s.timeoutMs },
+      http: {
+        method: s.method,
+        url: s.url,
+        headers: toObject(s.headers),
+        body: asObject(body.value) ? { ...(body.value as object), ...s.restIn?.body } : body.value,
+        timeoutMs: s.timeoutMs,
+        ...s.restIn?.http,
+      },
       extract: toObject(s.extract),
       checks: s.checks.filter((c) => c.left.trim()).map(checkOut),
-      ...(s.poll ? { wait: { until: s.poll.until.filter((c) => c.left.trim()).map(checkOut), everyMs: s.poll.everyMs, maxTries: s.poll.maxTries } } : {}),
+      ...(s.poll ? { wait: { until: s.poll.until.filter((c) => c.left.trim()).map(checkOut), everyMs: s.poll.everyMs, maxTries: s.poll.maxTries, ...s.restIn?.wait } } : {}),
       ...(s.retry ? { retry: s.retry } : {}),
       ...(s.onFailure === "continue" ? { onFailure: "continue" } : {}),
       ...s.rest,

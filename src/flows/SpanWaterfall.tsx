@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 import { cx } from "../components/ui";
 import type { Span } from "../lib/api";
 import { SERVICE_COLORS } from "../lib/util";
-import { selectServices, useStore } from "../state/store";
+import { selectServices, serviceForSpan, useStore } from "../state/store";
 import { formatMs } from "./parts";
 import { spanRows, spanSummary } from "./spans";
 
@@ -21,7 +21,7 @@ export function SpanWaterfall({ spans, traceId }: { spans: Span[]; traceId?: str
   const t0 = Math.min(...spans.map((s) => s.startMs));
   const t1 = Math.max(...spans.map((s) => s.startMs + s.durationMs));
   const total = Math.max(1, t1 - t0);
-  const colorOf = (name: string) => SERVICE_COLORS[services.find((s) => s.name.toLowerCase() === name.toLowerCase())?.color ?? 9];
+  const colorOf = (name: string) => SERVICE_COLORS[serviceForSpan(services, name)?.color ?? 9];
 
   return (
     <div className="border-b border-line py-1.5" aria-label="OpenTelemetry spans">

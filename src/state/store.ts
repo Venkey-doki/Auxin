@@ -106,7 +106,10 @@ export function selectServices(s: State): Service[] {
         portHint: d.portHint ?? o.lastPort ?? portFromCommand(o.command ?? d.defaultCommand ?? ""),
         manual: ws.manual.some((m) => m.id === d.id),
         otel: d.otel === true,
-        sendTraces: o.otel ?? d.otel === true,
+        otelEndpoint: d.otelEndpoint === true,
+        spanName: d.otelServiceName || o.name?.trim() || d.name,
+        // A service that exports somewhere of its own keeps doing so unless you switch this on.
+        sendTraces: o.otel ?? (d.otel === true && d.otelEndpoint !== true),
       };
     });
   return cacheVal;
@@ -373,7 +376,7 @@ export async function startService(id: string): Promise<boolean> {
   set((s) => ({ runtime: { ...s.runtime, [id]: { ...s.runtime[id], status: "starting", startedAt: Date.now(), code: undefined, error: undefined, port: undefined } } }));
   try {
     const port = svc.sendTraces ? get().otel?.port : null;
-    await api.start({ id, command: svc.command, cwd: svc.cwd, env: withOtelEnv(svc.env, svc.name, port ?? null), venv: svc.useVenv ? svc.venv : null });
+    await api.start({ id, command: svc.command, cwd: svc.cwd, env: withOtelEnv(svc.env, svc.spanName, port ?? null), venv: svc.useVenv ? svc.venv : null });
     return true;
   } catch (e) {
     const msg = String(e);
@@ -386,7 +389,9 @@ export async function startService(id: string): Promise<boolean> {
 
 /**
  * Points a service's OpenTelemetry exporter at Auxin's receiver. These are the
- * standard variables every SDK reads; anything the service sets itself wins.
+ * standard variables every SDK reads; variables set on the service in Auxin win.
+ * `name` is the service's own OTEL_SERVICE_NAME when its .env has one, so its
+ * spans keep the name it gave itself.
  */
 export function withOtelEnv(env: [string, string][], name: string, port: number | null): [string, string][] {
   if (!port) return env;
@@ -396,6 +401,12 @@ export function withOtelEnv(env: [string, string][], name: string, port: number 
     ["OTEL_SERVICE_NAME", name],
   ];
   return [...env, ...add.filter(([k]) => !env.some(([x]) => x === k))];
+}
+
+/** The workspace service a span's `service.name` belongs to. */
+export function serviceForSpan(services: Service[], name: string): Service | undefined {
+  const n = name.toLowerCase();
+  return services.find((s) => s.spanName.toLowerCase() === n) ?? services.find((s) => s.name.toLowerCase() === n);
 }
 
 export async function stopService(id: string) {

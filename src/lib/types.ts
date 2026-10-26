@@ -19,6 +19,10 @@ export interface DetectedService {
   portHint: number | null;
   /** Its dependencies include an OpenTelemetry SDK. */
   otel?: boolean;
+  /** Its own `.env` points the OTel exporter somewhere. */
+  otelEndpoint?: boolean;
+  /** `OTEL_SERVICE_NAME` from its own `.env`. */
+  otelServiceName?: string | null;
 }
 
 /** User edits layered over detection; keyed by service id (its path). */
@@ -105,6 +109,10 @@ export interface Service {
   manual: boolean;
   /** Uses an OpenTelemetry SDK (detected). */
   otel: boolean;
+  /** Its own `.env` already points its exporter somewhere, so Auxin leaves it alone unless told to. */
+  otelEndpoint: boolean;
+  /** The name its spans carry: its own `OTEL_SERVICE_NAME`, else its name in Auxin. */
+  spanName: string;
   /** Started with its trace exporter pointed at Auxin. */
   sendTraces: boolean;
 }

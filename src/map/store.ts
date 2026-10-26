@@ -65,7 +65,7 @@ export async function loadTopology(root: string) {
       flushTo(prev);
       parked.set(prev, { file: get().file, observed: get().observed, discovery: get().discovery });
     }
-    set({ root, file: emptyTopology(), observed: [], discovery: null, broken: null, ...parked.get(root) });
+    set({ root, file: emptyTopology(), observed: [], discovery: null, broken: null, discovering: scanning.has(root), ...parked.get(root) });
     parked.delete(root);
     lastWritten = null;
   }
@@ -126,20 +126,26 @@ export function setCodeScan(on: boolean) {
   void discover();
 }
 
+/** Workspaces with a scan in flight. Kept per workspace, so a switch mid-scan still scans the one you switched to. */
+const scanning = new Set<string>();
+
 /** Reads the project's compose, .env, k8s and config files (and code, if allowed) for services and links. */
 export async function discover() {
   const root = useFlows.getState().root;
-  if (!root || get().discovering) return;
+  if (!root || scanning.has(root)) return;
   const s = useStore.getState();
   const services = selectServices(s).map((svc) => ({ key: serviceKey(svc, root), path: svc.path, port: s.runtime[svc.id]?.port ?? svc.portHint ?? null }));
-  set({ discovering: true });
+  scanning.add(root);
+  if (get().root === root) set({ discovering: true });
   try {
     const discovery = await api.discoverTopology(root, services, codeScanAllowed());
-    if (useFlows.getState().root === root) set({ discovery });
+    // Switched away meanwhile: the next visit scans again, since that workspace's discovery was left empty.
+    if (get().root === root) set({ discovery });
   } catch (e) {
-    toast("error", "Couldn't scan the project", String(e));
+    if (get().root === root) toast("error", "Couldn't scan the project", String(e));
   } finally {
-    set({ discovering: false });
+    scanning.delete(root);
+    if (get().root === root) set({ discovering: false });
   }
 }
 

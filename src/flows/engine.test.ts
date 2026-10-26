@@ -201,6 +201,24 @@ describe("blocks in flow files", () => {
     expect(allSteps(parseFlow(f.path, text).steps).map((s) => s.id)).toEqual(["a", "t", "e", "p"]);
   });
 
+  it("keeps fields it doesn't know inside http, body, wait and queue", () => {
+    const text = JSON.stringify({
+      version: 2,
+      name: "N",
+      steps: [
+        { id: "a", type: "http", name: "A", http: { method: "POST", url: "http://x", body: { json: { n: 1 }, encoding: "gzip" }, proxy: "p:1" }, wait: { until: [], everyMs: 5, maxTries: 2, jitter: true } },
+        { id: "q", type: "queue.publish", name: "Q", queue: { broker: "mq", destination: "jobs", body: "{}", priority: 5 } },
+      ],
+    });
+    const doc = parseFlow("flows/n.flow.json", text);
+    const disk = JSON.parse(serializeFlow(doc).text);
+    expect(disk.steps[0].http).toMatchObject({ proxy: "p:1", body: { json: { n: 1 }, encoding: "gzip" } });
+    expect(disk.steps[0].wait).toMatchObject({ everyMs: 5, jitter: true });
+    expect(disk.steps[1].queue).toMatchObject({ destination: "jobs", priority: 5 });
+    // Known fields aren't duplicated into the preserved ones.
+    expect(allSteps(doc.steps)[0].restIn).toEqual({ http: { proxy: "p:1" }, body: { encoding: "gzip" }, wait: { jitter: true } });
+  });
+
   it("moves requests between lanes, but never puts a block inside a block", () => {
     const [a, b] = ids("a", "b");
     const items: FlowItem[] = [a, iff({ id: "if1", then: [b] }), par({ id: "p1" })];

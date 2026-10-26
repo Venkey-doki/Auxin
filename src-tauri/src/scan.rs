@@ -30,6 +30,11 @@ pub struct DetectedService {
     pub port_hint: Option<u16>,
     /// Already depends on an OpenTelemetry SDK, so it can export spans to Auxin unchanged.
     pub otel: bool,
+    /// Its own `.env` points the exporter somewhere (`OTEL_EXPORTER_OTLP_[TRACES_]ENDPOINT`):
+    /// Auxin leaves that alone unless told otherwise.
+    pub otel_endpoint: bool,
+    /// `OTEL_SERVICE_NAME` from its own `.env`; its spans carry this name.
+    pub otel_service_name: Option<String>,
 }
 
 const SKIP_DIRS: &[&str] = &[
@@ -151,6 +156,8 @@ fn detect(dir: &Path) -> Option<DetectedService> {
         venv: venv.map(|v| v.to_string_lossy().into_owned()),
         port_hint: port_from_env_file(dir).or(python_port),
         otel: uses_otel(dir),
+        otel_endpoint: ["OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"].iter().any(|k| env_var(dir, k).is_some()),
+        otel_service_name: env_var(dir, "OTEL_SERVICE_NAME"),
     })
 }
 
@@ -357,6 +364,23 @@ fn find_venv(dir: &Path) -> Option<PathBuf> {
     fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.is_dir() && is_venv(p))
 }
 
+/// A non-empty `KEY=value` from the service's own env files, most specific file first.
+fn env_var(dir: &Path, key: &str) -> Option<String> {
+    for f in [".env.local", ".env.development", ".env"] {
+        let Some(text) = read(&dir.join(f)) else { continue };
+        for line in text.lines() {
+            let line = line.trim().trim_start_matches("export ");
+            if let Some(v) = line.strip_prefix(key).and_then(|r| r.strip_prefix('=')) {
+                let v = v.trim().trim_matches('"').trim_matches('\'');
+                if !v.is_empty() {
+                    return Some(v.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 fn port_from_env_file(dir: &Path) -> Option<u16> {
     for f in [".env.local", ".env.development", ".env"] {
         let Some(text) = read(&dir.join(f)) else { continue };
@@ -383,6 +407,24 @@ mod tests {
         for s in scan(Path::new(&root)) {
             println!("{:<55} {:<8} {:<10} {:?} venv={:?}", s.name, s.kind, s.framework.unwrap_or_default(), s.default_command, s.venv.map(|v| file_name(Path::new(&v))));
         }
+    }
+
+    #[test]
+    fn reads_the_services_own_otel_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        for (path, text) in [
+            ("api/package.json", r#"{"scripts":{"dev":"node ."},"dependencies":{"@opentelemetry/sdk-node":"1"}}"#),
+            ("api/.env", "PORT=4000\nexport OTEL_SERVICE_NAME=\"orders-api\"\nOTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318\n"),
+            ("web/package.json", r#"{"scripts":{"dev":"node ."}}"#),
+            ("web/.env", "OTEL_SERVICE_NAME=\nOTEL_EXPORTER_OTLP_TRACES_ENDPOINT_X=1\n"),
+        ] {
+            std::fs::create_dir_all(dir.path().join(path).parent().unwrap()).unwrap();
+            std::fs::write(dir.path().join(path), text).unwrap();
+        }
+        let found: Vec<(String, bool, Option<String>)> = scan(dir.path()).into_iter().map(|s| (s.name, s.otel_endpoint, s.otel_service_name)).collect();
+        assert!(found.contains(&("api".into(), true, Some("orders-api".into()))), "{found:?}");
+        // Empty values and keys that only start with the name don't count.
+        assert!(found.contains(&("web".into(), false, None)), "{found:?}");
     }
 
     #[test]

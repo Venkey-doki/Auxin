@@ -10,6 +10,8 @@ export interface TrendPoint {
   at: string;
   /** Response time; missing when the request didn't get a response (or didn't run). */
   ms?: number;
+  /** It was sent this run (a queue step that passed may still have no time). */
+  ran: boolean;
   failed: boolean;
 }
 
@@ -34,7 +36,7 @@ export function percentile(values: number[], p: number): number | undefined {
 }
 
 function summarise(t: Omit<Trend, "p50" | "p95" | "runs" | "failures">): Trend {
-  const sent = t.points.filter((p) => p.ms != null || p.failed);
+  const sent = t.points.filter((p) => p.ran);
   const times = t.points.flatMap((p) => (p.ms != null ? [p.ms] : []));
   return { ...t, p50: percentile(times, 50), p95: percentile(times, 95), runs: sent.length, failures: sent.filter((p) => p.failed).length };
 }
@@ -52,7 +54,7 @@ export function flowTrends(records: RunRecord[]): Trend[] {
   const whole = summarise({
     id: "",
     name: "Whole run",
-    points: runs.map((r) => ({ runId: r.runId, at: r.startedAt, ms: Math.max(0, Date.parse(r.finishedAt) - Date.parse(r.startedAt)), failed: r.status === "failed" })),
+    points: runs.map((r) => ({ runId: r.runId, at: r.startedAt, ms: Math.max(0, Date.parse(r.finishedAt) - Date.parse(r.startedAt)), ran: true, failed: r.status === "failed" })),
   });
   const order: { id: string; name: string; method: string }[] = [];
   for (const r of [...records]) for (const s of r.steps) if (!order.some((o) => o.id === s.id)) order.push({ id: s.id, name: s.name, method: s.method });
@@ -61,8 +63,8 @@ export function flowTrends(records: RunRecord[]): Trend[] {
       ...o,
       points: runs.map((r): TrendPoint => {
         const s = r.steps.find((x) => x.id === o.id);
-        if (!s || s.state === "skipped" || s.state === "cancelled" || s.state === "queued") return { runId: r.runId, at: r.startedAt, failed: false };
-        return { runId: r.runId, at: r.startedAt, ms: s.ms, failed: FAILED.has(s.state) };
+        if (!s || s.state === "skipped" || s.state === "cancelled" || s.state === "queued") return { runId: r.runId, at: r.startedAt, ran: false, failed: false };
+        return { runId: r.runId, at: r.startedAt, ms: s.ms, ran: true, failed: FAILED.has(s.state) };
       }),
     }),
   );

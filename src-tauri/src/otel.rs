@@ -164,8 +164,15 @@ async fn serve(listener: TcpListener, state: Arc<OtelState>) {
 }
 
 async fn handle(state: Arc<OtelState>, req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
-    let json = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("application/json"));
+    let ctype = req.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_ascii_lowercase();
+    let json = ctype.starts_with("application/json");
+    // Exporters send OTLP content types and no Origin. A web page can POST to localhost only as a
+    // "simple" request (text/plain, forms) and always sends an Origin, so both are refused.
+    let from_browser = req.headers().contains_key(header::ORIGIN);
+    let otlp = json || ctype.starts_with("application/x-protobuf");
     let code = match (req.method(), req.uri().path()) {
+        (&Method::POST, _) if from_browser => StatusCode::FORBIDDEN,
+        (&Method::POST, "/v1/traces" | "/v1/metrics" | "/v1/logs") if !otlp => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         (&Method::POST, "/v1/traces") => match receive(req, json).await {
             Ok(spans) => {
                 state.insert(spans);
@@ -423,6 +430,9 @@ mod tests {
         assert_eq!(post(port, "/v1/metrics", &[("content-type", "application/x-protobuf")], vec![1, 2, 3]), (200, vec![]));
         assert_eq!(post(port, "/v1/logs", &[("content-type", "application/json")], b"{}".to_vec()), (200, b"{}".to_vec()));
         assert_eq!(post(port, "/v1/spans", &[], vec![]).0, 404);
+        // What a web page could send to localhost: a "simple" text/plain POST, or anything with an Origin.
+        assert_eq!(post(port, "/v1/traces", &[("content-type", "text/plain")], vec![]).0, 415);
+        assert_eq!(post(port, "/v1/traces", &[("content-type", "application/x-protobuf"), ("origin", "https://evil.example")], vec![]).0, 403);
         assert_eq!(state.status().spans, 0);
 
         // Declared length over the limit is refused before the body is read.

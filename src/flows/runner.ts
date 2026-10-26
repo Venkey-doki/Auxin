@@ -5,7 +5,7 @@
  */
 import { api, type HttpResponse, type QueueMessage, type Span } from "../lib/api";
 import { getLogs } from "../state/logs";
-import { selectServices, toast, useStore } from "../state/store";
+import { selectServices, serviceForSpan, toast, useStore } from "../state/store";
 import { mask, prepareQueue, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, runQueueStep, validateFlow, type Issue, type QueueStepResult } from "./engine";
 import type { CheckResult } from "./eval";
 import { serviceKey } from "../map/model";
@@ -310,9 +310,9 @@ async function fetchSpans(o: StepOutcome): Promise<Span[]> {
   return api.otelSpans([o.traceId]).catch(() => []);
 }
 
-/** The flow service a span's `service.name` belongs to: Auxin starts services with their name as the service name. */
+/** The flow service a span's `service.name` belongs to: its own OTEL_SERVICE_NAME, else its name in Auxin. */
 function flowServiceNamed(doc: FlowDoc, name: string): { id: string; alias: string } | undefined {
-  const svc = selectServices(useStore.getState()).find((x) => x.name.toLowerCase() === name.toLowerCase());
+  const svc = serviceForSpan(selectServices(useStore.getState()), name);
   if (!svc) return undefined;
   const fs = doc.services.find((f) => serviceIdFor(f.ref) === svc.id);
   return { id: svc.id, alias: fs?.alias ?? svc.name };
@@ -323,7 +323,7 @@ function observeSpans(root: string, spans: Span[], requestId?: string) {
   if (!spans.length || get().root !== root) return;
   const services = selectServices(useStore.getState());
   const key = (name: string) => {
-    const svc = services.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    const svc = serviceForSpan(services, name);
     return svc ? serviceKey(svc, root) : undefined;
   };
   recordObserved(

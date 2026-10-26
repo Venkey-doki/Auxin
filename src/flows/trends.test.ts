@@ -45,6 +45,11 @@ describe("trends", () => {
     expect(a).toMatchObject({ runs: 1, failures: 1, p50: undefined });
   });
 
+  it("a queue step that passed with no time still counts as a run; a cancelled one doesn't", () => {
+    const [, q] = flowTrends([rec(3, [["q", "cancelled", undefined]]), rec(2, [["q", "passed", undefined]]), rec(1, [["q", "passed", 12]])]);
+    expect(q).toMatchObject({ runs: 2, failures: 0, p50: 12 });
+  });
+
   it("no runs, no trends", () => {
     expect(flowTrends([])).toEqual([]);
   });

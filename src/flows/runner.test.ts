@@ -29,7 +29,7 @@ vi.mock("../lib/api", () => ({
 }));
 
 import { api } from "../lib/api";
-import { editTopology, useMap } from "../map/store";
+import { editTopology, loadTopology, useMap } from "../map/store";
 import { appendLogs } from "../state/logs";
 import { useStore } from "../state/store";
 import { blankBlock, blankQueueStep, blankStep, isStep, newFlow, parseEnv, serializeFlow, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
@@ -544,5 +544,31 @@ describe("saving to the right workspace", () => {
     // The flow keeps its links until the map can take them.
     expect(write.mock.calls.filter(([, path]) => path === "flows/old.flow.json")).toEqual([]);
     vi.mocked(api.auxinRead).mockImplementation(async () => "{}");
+  });
+});
+
+describe("map discovery across a workspace switch", () => {
+  it("a scan still running for the old workspace doesn't block or leak into the new one", async () => {
+    setup([]);
+    const pending: Record<string, (d: unknown) => void> = {};
+    vi.mocked(api.discoverTopology).mockImplementation((root: string) => new Promise((r) => (pending[root] = r as never)));
+    useMap.setState({ root: null, discovery: null, discovering: false });
+    useFlows.setState({ root: "/a" });
+    await loadTopology("/a");
+    expect(useMap.getState().discovering).toBe(true);
+
+    useFlows.setState({ root: "/b" });
+    await loadTopology("/b");
+    expect(Object.keys(pending)).toEqual(["/a", "/b"]);
+    expect(useMap.getState().discovering).toBe(true);
+
+    pending["/a"]({ nodes: [{ key: "a-only" }], edges: [] });
+    await sleep(0);
+    expect(useMap.getState()).toMatchObject({ root: "/b", discovery: null, discovering: true });
+
+    pending["/b"]({ nodes: [], edges: [] });
+    await sleep(0);
+    expect(useMap.getState()).toMatchObject({ discovery: { nodes: [], edges: [] }, discovering: false });
+    vi.mocked(api.discoverTopology).mockImplementation(async () => ({ nodes: [], edges: [] }) as never);
   });
 });

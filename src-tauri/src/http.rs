@@ -151,11 +151,22 @@ fn body_file(root: Option<&str>, rel: &str) -> Result<PathBuf, String> {
     }
     let root = std::fs::canonicalize(root.ok_or("Body files need an open workspace")?).map_err(|e| format!("Couldn't open the workspace folder: {e}"))?;
     let full = std::fs::canonicalize(root.join(p)).map_err(|e| format!("Couldn't read body file {rel}: {e}"))?;
-    if full.starts_with(&root) {
-        Ok(full)
-    } else {
-        Err(outside())
+    let Ok(inside) = full.strip_prefix(&root) else { return Err(outside()) };
+    if is_secret_file(inside) {
+        return Err(format!("Body file {rel} holds secrets or git data (.env files, .auxin/env, .git, .ssh), so Auxin won't send it."));
     }
+    Ok(full)
+}
+
+/// Files a cloned flow must never be able to send anywhere, even though they're in the workspace.
+fn is_secret_file(rel: &Path) -> bool {
+    let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).collect();
+    let name = parts.last().map(String::as_str).unwrap_or("");
+    parts.iter().any(|c| c == ".git" || c == ".ssh")
+        || parts.windows(2).any(|w| w[0] == ".auxin" && w[1] == "env")
+        || name == ".env"
+        || name.starts_with(".env.")
+        || name.ends_with(".secret.json")
 }
 
 async fn execute(state: &HttpState, req: HttpRequest, temp_dir: PathBuf) -> Result<HttpResponse, String> {
@@ -462,6 +473,13 @@ mod tests {
             let err = body_file(root.as_deref(), rel).unwrap_err();
             assert!(err.contains("outside the workspace"), "{rel}: {err}");
         }
+        for (path, text) in [(".env", "A=1"), (".env.local", "A=1"), (".auxin/env/local.secret.json", "{}"), (".git/config", "[core]"), ("svc/.env.production", "A=1")] {
+            std::fs::create_dir_all(project.join(path).parent().unwrap()).unwrap();
+            std::fs::write(project.join(path), text).unwrap();
+            assert!(body_file(root.as_deref(), path).unwrap_err().contains("holds secrets or git data"), "{path}");
+        }
+        std::fs::write(project.join("payload.env.json"), "{}").unwrap();
+        assert!(body_file(root.as_deref(), "payload.env.json").is_ok());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(&secret, project.join("link.json")).unwrap();

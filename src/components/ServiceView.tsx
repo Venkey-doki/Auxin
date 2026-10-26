@@ -284,7 +284,7 @@ function ServiceSettings({ service }: { service: Service }) {
             <span className="text-sm font-semibold text-fg-2">Send OpenTelemetry traces to Auxin</span>
             <span className="text-sm text-fg-3">
               {otel?.port
-                ? `${service.otel ? "Uses an OpenTelemetry SDK." : "No OpenTelemetry SDK found in its dependencies; turn this on if it has one."} When on, Auxin starts it with OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:${otel.port}, so flows show its spans. Its own OTEL_* variables win.`
+                ? `${service.otel ? "Uses an OpenTelemetry SDK." : "No OpenTelemetry SDK found in its dependencies; turn this on if it has one."} When on, Auxin starts it with OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:${otel.port}, so flows show its spans. OTEL_* variables you set below win.${service.otelEndpoint ? " Its .env already sends traces elsewhere, so this starts off; turning it on overrides that." : ""}`
                 : (otel?.error ?? "Auxin's trace receiver isn't running.")}
               {otel?.fallback && " Port 4318 is used by another program, so only services Auxin starts reach it."}
             </span>
