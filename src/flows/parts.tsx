@@ -18,8 +18,11 @@ export const METHOD_COLOR: Record<string, string> = {
 };
 export const METHODS = Object.keys(METHOD_COLOR);
 
+/** Queue steps' badges: publish and subscribe (wait for a message). */
+const QUEUE_COLOR: Record<string, string> = { PUB: "#76c8bd", SUB: "#d7b46e" };
+
 export function MethodBadge({ method }: { method: string }) {
-  const c = METHOD_COLOR[method] ?? "#a9b8d6";
+  const c = METHOD_COLOR[method] ?? QUEUE_COLOR[method] ?? "#a9b8d6";
   return (
     <span className="inline-grid h-5 w-14 flex-none place-items-center rounded font-mono text-[11px] font-semibold" style={{ color: c, background: `color-mix(in oklab, ${c} 16%, transparent)` }}>
       {method}

@@ -4,9 +4,9 @@
  * `runner.ts` connects it to the UI state, tracing and history. Keeping this
  * pure is what lets step kinds and control flow be tested on their own.
  */
-import type { HttpBody, HttpRequest, HttpResponse, NetPolicy } from "../lib/api";
+import type { HttpBody, HttpRequest, HttpResponse, NetPolicy, QueueMessage, StepRequest, StepResult } from "../lib/api";
 import { evalCheck, extractValue, type CheckResult, type ResponseView } from "./eval";
-import { allSteps, type FlowItem, type FlowStep, type KV } from "./model";
+import { allSteps, isStep, type Broker, type FlowItem, type FlowStep, type KV } from "./model";
 import { newTraceIds } from "./trace";
 import { resolve, type VarSources } from "./vars";
 
@@ -216,6 +216,166 @@ async function sendOnce(step: FlowStep, req: PreparedRequest, opts: HttpStepOpti
   return { state: checks.every((c) => c.ok) ? "passed" : "failed", res, tries: sentBefore + tries, checks, extracted };
 }
 
+/* ---------- queue steps ---------- */
+
+export interface PreparedQueue {
+  broker?: Broker;
+  destination: string;
+  routingKey: string;
+  key: string;
+  headers: [string, string][];
+  body: string;
+  missing: string[];
+  usedSecrets: string[];
+  requestId?: string;
+  traceId?: string;
+}
+
+/** Resolves variables in a queue step (broker URL included) and, for publish, adds the trace headers. */
+export function prepareQueue(step: FlowStep, src: VarSources, brokers: Record<string, Broker>, injectHeaders: boolean): PreparedQueue {
+  const q = step.queue!;
+  const missing = new Set<string>();
+  const usedSecrets = new Set<string>();
+  const r = (text: string) => {
+    const out = resolve(text, src);
+    out.missing.forEach((m) => missing.add(m));
+    out.usedSecrets.forEach((m) => usedSecrets.add(m));
+    return out.text;
+  };
+  const b = brokers[q.broker];
+  const broker = b ? { type: b.type, url: r(b.url) } : undefined;
+  const headers: [string, string][] = step.type === "queue.publish" ? q.headers.filter((h) => h.key.trim()).map((h) => [h.key.trim(), r(h.value)]) : [];
+  const out: PreparedQueue = { broker, destination: r(q.destination), routingKey: r(q.routingKey), key: r(q.key), headers, body: step.type === "queue.publish" ? r(q.body) : "", missing: [], usedSecrets: [] };
+  if (injectHeaders && step.type === "queue.publish") {
+    // The same ids as an HTTP request, so a consumer that logs or forwards them can be traced.
+    const ids = newTraceIds();
+    const has = (n: string) => headers.find(([k]) => k.toLowerCase() === n);
+    out.requestId = has("x-request-id")?.[1] ?? ids.requestId;
+    if (!has("x-request-id")) headers.push(["X-Request-ID", ids.requestId]);
+    if (!has("traceparent")) headers.push(["traceparent", ids.traceparent]);
+    out.traceId = ids.traceId;
+  }
+  out.missing = [...missing];
+  out.usedSecrets = [...usedSecrets];
+  return out;
+}
+
+function queueIssues(s: FlowStep, n: number, ctx: ValidateContext): Issue[] {
+  const q = s.queue!;
+  const b = ctx.brokers?.[q.broker];
+  const err = (message: string): Issue[] => [{ id: s.id, level: "error", message }];
+  if (!q.broker) return err(`Step ${n} has no broker. Pick one, or add one under Environment.`);
+  if (!b) return err(`There's no broker “${q.broker}” in “${ctx.envName}”. Add it under Environment.`);
+  if (b.type === "kafka" && !q.destination.trim()) return err(`Step ${n} has no topic.`);
+  if (s.type === "queue.publish" && !q.destination.trim() && !q.routingKey.trim()) return err(`Step ${n} has no exchange or routing key. To send straight to a queue, leave the exchange empty and put the queue name in the routing key.`);
+  if (s.type === "queue.consume" && b.type === "rabbitmq" && !q.destination.trim())
+    return err(`Step ${n} needs an exchange to listen on. Auxin listens through its own temporary queue, so it can't watch a queue directly without taking messages from your workers.`);
+  return [];
+}
+
+/** A received message as checks and extraction see it: `header.<name>` and `body…` work as for responses. */
+export function messageView(m: QueueMessage): ResponseView {
+  return { status: 0, timeMs: 0, headers: m.headers, bodyText: m.bodyText };
+}
+
+export interface QueueStepResult {
+  state: "passed" | "failed" | "error" | "cancelled";
+  tries: number;
+  checks: CheckResult[];
+  extracted: KV[];
+  error?: string;
+  /** Consume: the message that matched. */
+  message?: QueueMessage;
+  /** Consume: messages received but not matching, and messages from other runs left out. */
+  seen?: number;
+  skipped?: number;
+  /** Publish: where it went. */
+  published?: { ms: number; destination: string; partition?: number | null; offset?: number | null };
+}
+
+export interface QueueStepOptions {
+  /** Request id; also the subscription id of a consume step unless `subscription` is given. */
+  reqId: string;
+  /** An already-open subscription (a run opens one per consume step when it starts). */
+  subscription?: string;
+  /** Consume with matchRun: the trace / request ids of this run's steps so far. */
+  traceIds: () => string[];
+  policy?: NetPolicy;
+}
+
+export interface QueueStepDeps {
+  exec: (req: StepRequest) => Promise<StepResult>;
+  cancel: (id: string) => Promise<unknown>;
+  cancelled: () => boolean;
+  now?: () => number;
+}
+
+/** Longest single wait for messages, so Stop is noticed quickly. */
+const CONSUME_SLICE_MS = 1000;
+
+export async function runQueueStep(step: FlowStep, prep: PreparedQueue, opts: QueueStepOptions, deps: QueueStepDeps): Promise<QueueStepResult> {
+  const q = step.queue!;
+  const base = { tries: 1, checks: [] as CheckResult[], extracted: [] as KV[] };
+  const fail = (e: unknown): QueueStepResult => (String(e) === "Cancelled" || deps.cancelled() ? { ...base, state: "cancelled", error: "Cancelled." } : { ...base, state: "error", error: String(e) });
+  if (!prep.broker) return { ...base, state: "error", error: `There's no broker “${q.broker}” in this environment.` };
+
+  if (step.type === "queue.publish") {
+    try {
+      const r = await deps.exec({ kind: "queue.publish", id: opts.reqId, broker: prep.broker, destination: prep.destination, routingKey: prep.routingKey || null, key: prep.key || null, headers: prep.headers, body: prep.body, policy: opts.policy });
+      if (r.kind !== "queue.publish") throw new Error("Unexpected reply");
+      return { ...base, state: "passed", published: { ms: r.ms, destination: r.destination, partition: r.partition, offset: r.offset } };
+    } catch (e) {
+      return fail(e);
+    }
+  }
+
+  const now = deps.now ?? Date.now;
+  const sub = opts.subscription ?? opts.reqId;
+  const deadline = now() + q.timeoutMs;
+  const conditions = step.checks.filter((c) => c.left.trim());
+  let seen = 0;
+  let skipped = 0;
+  try {
+    while (!deps.cancelled()) {
+      const wait = Math.max(0, Math.min(CONSUME_SLICE_MS, deadline - now()));
+      const r = await deps.exec({ kind: "queue.consume", id: sub, broker: prep.broker, source: prep.destination, binding: prep.routingKey || null, traceIds: q.matchRun ? opts.traceIds() : [], waitMs: wait, policy: opts.policy });
+      if (r.kind !== "queue.consume") throw new Error("Unexpected reply");
+      skipped += r.skipped;
+      for (const m of r.messages) {
+        seen++;
+        const view = messageView(m);
+        const checks = conditions.map((c) => evalCheck(c, view));
+        if (!checks.every((c) => c.ok)) continue;
+        const extracted: KV[] = [];
+        const missingExtract: string[] = [];
+        for (const e of step.extract.filter((x) => x.key.trim() && x.value.trim())) {
+          const v = extractValue(e.value, view);
+          if (v === undefined) missingExtract.push(e.key);
+          else extracted.push({ key: e.key.trim(), value: v });
+        }
+        if (missingExtract.length) checks.push({ label: `extract ${missingExtract.join(", ")}`, ok: false, got: "path not found in the message" });
+        return { ...base, state: checks.every((c) => c.ok) ? "passed" : "failed", checks, extracted, message: m, seen, skipped };
+      }
+      if (now() >= deadline) break;
+    }
+    if (deps.cancelled()) return { ...base, state: "cancelled", error: "Cancelled.", seen, skipped };
+    const where = q.destination || q.routingKey;
+    const other = [seen && `${seen} other message${seen === 1 ? "" : "s"} didn't match`, skipped && `${skipped} from other runs were left out`].filter(Boolean).join("; ");
+    return {
+      ...base,
+      state: "failed",
+      seen,
+      skipped,
+      checks: [{ label: `message on ${where}`, ok: false, got: `none within ${Math.round(q.timeoutMs / 1000)}s${other ? ` (${other})` : ""}` }],
+    };
+  } catch (e) {
+    return { ...fail(e), seen, skipped };
+  } finally {
+    // Closes the subscription; listening ends with the step.
+    void deps.cancel(sub).catch(() => undefined);
+  }
+}
+
 /* ---------- walking a flow ---------- */
 
 export type RunStatus = "passed" | "failed" | "cancelled";
@@ -244,7 +404,7 @@ export const PARALLEL_LIMIT = 4;
  * block starts every request in it, even after one fails, and the flow moves
  * on when all have finished.
  */
-export async function runItems<T extends { state: string; res?: HttpResponse }>(items: FlowItem[], hooks: WalkHooks<T>): Promise<WalkResult<T>> {
+export async function runItems<T extends { state: string; res?: HttpResponse; message?: QueueMessage }>(items: FlowItem[], hooks: WalkHooks<T>): Promise<WalkResult<T>> {
   const outcomes = new Map<string, T>();
   const branches: Record<string, "then" | "else"> = {};
   let failed = false;
@@ -266,7 +426,7 @@ export async function runItems<T extends { state: string; res?: HttpResponse }>(
   };
 
   for (const item of items) {
-    if (item.type === "http") {
+    if (isStep(item)) {
       await one(item);
       continue;
     }
@@ -275,8 +435,8 @@ export async function runItems<T extends { state: string; res?: HttpResponse }>(
       continue;
     }
     if (item.type === "if") {
-      const res = last?.res;
-      const taken = res && item.when.filter((c) => c.left.trim()).every((c) => evalCheck(c, toView(res)).ok) ? "then" : "else";
+      const view = last?.res ? toView(last.res) : last?.message ? messageView(last.message) : undefined;
+      const taken = view && item.when.filter((c) => c.left.trim()).every((c) => evalCheck(c, view).ok) ? "then" : "else";
       branches[item.id] = taken;
       for (const s of taken === "then" ? item.else : item.then) outcomes.set(s.id, hooks.notRun(s, "skipped"));
       for (const s of taken === "then" ? item.then : item.else) await one(s);
@@ -309,6 +469,8 @@ export interface ValidateContext {
   /** Values known before the run: environment, secrets, service URLs. */
   src: VarSources;
   envName: string;
+  /** The environment's brokers, for queue steps. */
+  brokers?: Record<string, Broker>;
   /** A better explanation for a variable with no value, e.g. a service whose port isn't known yet. */
   explain?: (name: string) => string | undefined;
 }
@@ -328,8 +490,10 @@ export function validateFlow(items: FlowItem[], ctx: ValidateContext): Issue[] {
   const maybe = new Set<string>();
 
   const check = (s: FlowStep, known: Set<string>, siblings: FlowStep[] = []) => {
-    if (!s.url.trim()) issues.push({ id: s.id, level: "error", message: `Request ${num(s.id)} has no URL.` });
-    for (const m of prepareRequest(s, ctx.src, false).missing) {
+    if (s.queue) queueIssues(s, num(s.id), ctx).forEach((i) => issues.push(i));
+    else if (!s.url.trim()) issues.push({ id: s.id, level: "error", message: `Request ${num(s.id)} has no URL.` });
+    const missing = s.queue ? prepareQueue(s, ctx.src, ctx.brokers ?? {}, false).missing : prepareRequest(s, ctx.src, false).missing;
+    for (const m of missing) {
       if (known.has(m)) continue;
       if (maybe.has(m)) {
         issues.push({ id: s.id, level: "warning", message: `{{${m}}} comes from a request inside an if block, so it's empty when that lane doesn't run.` });
@@ -350,11 +514,13 @@ export function validateFlow(items: FlowItem[], ctx: ValidateContext): Issue[] {
   };
 
   items.forEach((item, i) => {
-    if (item.type === "http") {
+    if (isStep(item)) {
       check(item, produced);
       extracts(item).forEach((k) => produced.add(k));
     } else if (item.type === "if") {
-      if (items[i - 1]?.type !== "http") issues.push({ id: item.id, level: "error", message: "An if block reads the response of the request just before it. Put a request above this block." });
+      const prev = items[i - 1];
+      if (!prev || !isStep(prev) || prev.type === "queue.publish")
+        issues.push({ id: item.id, level: "error", message: "An if block reads the response (or received message) of the step just before it. Put a request or a wait-for-message step above this block." });
       if (!item.when.some((c) => c.left.trim())) issues.push({ id: item.id, level: "error", message: "This if block has no condition yet." });
       if (!item.then.length && !item.else.length) issues.push({ id: item.id, level: "warning", message: "This if block has no requests yet." });
       for (const lane of [item.then, item.else]) {

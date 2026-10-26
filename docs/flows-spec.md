@@ -86,6 +86,24 @@ It must work for any project:
 - `if` checks `when` (the same rows as checks) on the response of the request just before the block, and runs `then` when every condition holds, `else` otherwise. The lane not taken is marked "not taken".
 - `parallel` sends its requests at once, at most 4 in flight. Every request in it is sent even if one fails; the flow then stops (or continues, per `onFailure`) once all have finished. Requests in one parallel block can't use each other's extracted values.
 
+**Queue steps.** A step can publish a message or wait for one, on a broker named in the environment (§2.2):
+
+```json
+{ "id": "p", "type": "queue.publish", "name": "Order created",
+  "queue": { "broker": "rabbit", "destination": "orders", "routingKey": "order.created",
+             "headers": { "x-tenant": "{{tenant}}" }, "body": "{\"orderId\": \"{{orderId}}\"}" } }
+{ "id": "c", "type": "queue.consume", "name": "Payment done",
+  "queue": { "broker": "rabbit", "destination": "orders", "routingKey": "#", "matchRun": false, "timeoutMs": 15000 },
+  "checks": [ { "left": "body.status", "op": "==", "right": "paid" } ],
+  "extract": { "paymentId": "body.paymentId" } }
+```
+
+- `destination` is a RabbitMQ exchange (`""` is the default exchange: the routing key is then the queue name) or a Kafka topic. RabbitMQ uses `routingKey` (for consume, the binding pattern; `#` takes everything); Kafka publish can set a message `key`.
+- Publish adds `X-Request-ID` and `traceparent` headers, like a request.
+- **Consume never takes messages from your services.** On RabbitMQ it listens through its own temporary queue bound to the exchange; on Kafka it reads each partition from the newest offset without a consumer group. A message sent straight to a queue (default exchange) can't be watched this way.
+- In a run, every consume step starts listening when the run starts, so a message caused by an earlier step isn't missed. The step then waits up to `timeoutMs` for the first message that passes its `checks` (paths `body…` and `header.<name>`), and can `extract` from it. With `matchRun`, only messages carrying a trace or request id from this run count, which needs your services to pass those headers on.
+- An if block right after a consume step reads the message it received.
+
 **Checked before a run.** Run refuses to start, and the flow shows a strip of problems, when a request has no URL, a `{{variable}}` has no value or is only extracted later (or by a request sent at the same time), a service's port isn't known yet, or an if block has no condition or no request before it. Variables extracted inside an if lane are a warning, since they may be empty.
 
 ### 2.2 Environment and secret files
@@ -99,6 +117,7 @@ It must work for any project:
 
 - `baseUrls` is optional. When a service has no entry, `{{alias}}` resolves to `http://localhost:<port>` from the service's detected or announced port (§4.1).
 - The environment picker in the top bar lists every file in `.auxin/env/`. `local` is created automatically.
+- `brokers: { "rabbit": { "type": "rabbitmq", "url": "amqp://guest:{{rabbitPass}}@localhost:5672" }, "events": { "type": "kafka", "url": "localhost:9092" } }` names the message brokers queue steps use. Put passwords in a secret. The network rules below apply to brokers too.
 - `network: { "allowPrivate": true, "allowHosts": ["*.staging.example.com"] }` limits where the environment's requests may go. `allowPrivate` (default on) covers localhost and private addresses; a non-empty `allowHosts` limits public hosts to that list (exact, or `*.` for subdomains). Cloud metadata and link-local addresses are always blocked. The backend checks the resolved address it connects to and every redirect, so a name can't be pointed elsewhere after the check. When an `HTTP(S)_PROXY` environment variable is set, the proxy resolves names, so that last check applies only to IP addresses.
 
 ### 2.3 Run history

@@ -130,7 +130,7 @@ const files = new Map<string, string>([
       2,
     ),
   ],
-  ["env/local.json", JSON.stringify({ vars: { region: "eu-west" }, baseUrls: {} }, null, 2)],
+  ["env/local.json", JSON.stringify({ vars: { region: "eu-west" }, baseUrls: {}, brokers: { rabbit: { type: "rabbitmq", url: "amqp://guest:guest@localhost:5672" } } }, null, 2)],
   ["env/local.secret.json", JSON.stringify({ vars: { token: "dev-preview-token" } }, null, 2)],
 ]);
 
@@ -143,6 +143,26 @@ const downstream: Record<string, string[]> = { "api-gateway": ["auth-service"], 
  * Answers like a running dev server: logs the request (with the X-Request-ID it
  * received) and "forwards" it downstream so the trace has hops. Refuses when stopped.
  */
+/** An in-memory broker: every subscription on a destination gets a copy of what's published there. */
+type MockMsg = { source: string; routingKey: string | null; headers: [string, string][]; bodyText: string; bodyBase64: null; size: number; receivedAt: number };
+const subs = new Map<string, { source: string; buffer: MockMsg[] }>();
+
+async function fakePublish(req: { destination: string; routingKey: string | null; headers: [string, string][]; body: string }) {
+  const msg: MockMsg = { source: req.destination, routingKey: req.routingKey, headers: req.headers, bodyText: req.body, bodyBase64: null, size: req.body.length, receivedAt: Date.now() };
+  await new Promise((r) => setTimeout(r, 30));
+  for (const sub of subs.values()) if (sub.source === req.destination) sub.buffer.push(msg);
+  // Pretend a worker reacted: it publishes the "paid" event on the same exchange a moment later.
+  if (req.body.includes('"pending"')) setTimeout(() => void fakePublish({ ...req, body: req.body.replace('"pending"', '"paid"') }), 400);
+  return { kind: "queue.publish", ms: 4, destination: req.destination, partition: null, offset: null };
+}
+
+async function fakeConsume(req: { id: string; source: string; waitMs: number }) {
+  if (!subs.has(req.id)) subs.set(req.id, { source: req.source, buffer: [] });
+  const sub = subs.get(req.id)!;
+  for (let waited = 0; !sub.buffer.length && waited < req.waitMs; waited += 50) await new Promise((r) => setTimeout(r, 50));
+  return { kind: "queue.consume", messages: sub.buffer.splice(0), skipped: 0 };
+}
+
 async function fakeHttp(req: { method: string; url: string; headers: [string, string][]; body: { kind: string; value?: string } }) {
   const u = new URL(req.url);
   const port = Number(u.port || 80);
@@ -239,8 +259,9 @@ export function installMockBackend() {
         case "file_preview":
           return ['{ "region": "eu-west", "hours": 24 }', 34];
         case "step_exec":
-          return fakeHttp(a.req);
+          return a.req.kind === "queue.publish" ? fakePublish(a.req) : a.req.kind === "queue.consume" ? fakeConsume(a.req) : fakeHttp(a.req);
         case "step_cancel":
+          subs.delete(a.id);
           return true;
         case "http_drop_jar":
           return null;

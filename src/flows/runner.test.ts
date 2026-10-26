@@ -32,7 +32,7 @@ import { api } from "../lib/api";
 import { useMap } from "../map/store";
 import { appendLogs } from "../state/logs";
 import { useStore } from "../state/store";
-import { blankBlock, blankStep, isStep, newFlow, parseEnv, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
+import { blankBlock, blankQueueStep, blankStep, isStep, newFlow, parseEnv, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
 import { cancelRun, cancelStep, replayRun, runFlow, sendStep } from "./runner";
 import { rk, saveEnv, syncWorkspace, updateFlow, useFlows } from "./store";
 
@@ -401,5 +401,36 @@ describe("project map handover", () => {
     const flow = http.writes.filter(([p]) => p === "flows/old.flow.json").slice(-1)[0];
     expect(JSON.parse(flow[1])).not.toHaveProperty("directions");
     expect(http.writes.some(([p, t]) => p === "topology.json" && t.includes('"from": "gw"'))).toBe(true);
+  });
+});
+
+describe("queue steps in a run", () => {
+  it("starts listening when the run starts, and asks for messages carrying this run's ids", async () => {
+    const calls: { kind: string; id: string; waitMs?: number; traceIds?: string[] }[] = [];
+    vi.mocked(api).stepExec = vi.fn(async (req) => {
+      calls.push(req as never);
+      if (req.kind === "queue.consume") return req.waitMs === 0 ? { kind: "queue.consume", messages: [], skipped: 0 } : { kind: "queue.consume", messages: [{ source: "orders", headers: [], bodyText: '{"ok":true}', bodyBase64: null, size: 11, receivedAt: 1 }], skipped: 0 };
+      return { kind: "queue.publish", ms: 3, destination: "orders", partition: null, offset: null };
+    }) as never;
+    vi.mocked(api).stepCancel = vi.fn(async () => true) as never;
+    http.handler = async () => res(200, {});
+    const pub = blankQueueStep("queue.publish", "rabbit");
+    const sub = blankQueueStep("queue.consume", "rabbit");
+    const doc = setup([
+      step({ id: "h", url: "{{gw}}/orders" }),
+      { ...pub, id: "p", queue: { ...pub.queue!, destination: "orders", routingKey: "x" } },
+      { ...sub, id: "c", queue: { ...sub.queue!, destination: "orders", matchRun: true } },
+    ]);
+    useFlows.setState((s) => ({ envs: { local: { ...s.envs.local, brokers: { rabbit: { type: "rabbitmq", url: "amqp://localhost" } } } } }));
+    await runFlow(doc.path);
+    // The subscription opened before the HTTP request was sent, with the same id the step then reads.
+    expect(calls[0]).toMatchObject({ kind: "queue.consume", waitMs: 0 });
+    expect(http.sent).toHaveLength(1);
+    const read = calls.find((c) => c.kind === "queue.consume" && c.waitMs !== 0)!;
+    expect(read.id).toBe(calls[0].id);
+    // The HTTP request's and the publish's ids, so a consumer that passes them on matches.
+    expect(read.traceIds).toEqual(expect.arrayContaining([out("h").traceId, out("p").traceId]));
+    expect(out("c")).toMatchObject({ state: "passed", message: { bodyText: '{"ok":true}' } });
+    expect(useFlows.getState().runs[doc.path].status).toBe("passed");
   });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { HttpRequest, HttpResponse } from "../lib/api";
-import { PARALLEL_LIMIT, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, validateFlow, type ValidateContext } from "./engine";
-import { allSteps, blankBlock, blankStep, moveItem, newFlow, parseFlow, serializeFlow, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
+import type { HttpRequest, HttpResponse, QueueMessage, StepRequest } from "../lib/api";
+import { PARALLEL_LIMIT, prepareQueue, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, runQueueStep, validateFlow, type ValidateContext } from "./engine";
+import { allSteps, blankBlock, blankQueueStep, blankStep, moveItem, newFlow, parseFlow, serializeFlow, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
 import type { VarSources } from "./vars";
 
 const src: VarSources = { secrets: { token: "s3cret" }, vars: {}, serviceUrls: { gw: "http://localhost:4000" } };
@@ -82,7 +82,7 @@ describe("retry", () => {
   });
 });
 
-type Out = { state: string; res?: HttpResponse };
+type Out = { state: string; res?: HttpResponse; message?: QueueMessage };
 const hooks = (results: Record<string, Out>, log: string[] = []) => ({
   run: async (s: FlowStep) => (log.push(s.id), results[s.id] ?? { state: "passed" }),
   notRun: (_s: FlowStep, why: "skipped" | "cancelled") => ({ state: why }),
@@ -170,7 +170,7 @@ describe("validateFlow", () => {
 
   it("checks if blocks: a request before them, a condition, and variables set in only one lane", () => {
     const lane = iff({ id: "if1", then: [extracting("t", "maybe")], else: [] });
-    expect(msgs([lane])).toContain("error: An if block reads the response of the request just before it. Put a request above this block.");
+    expect(msgs([lane])).toContain("error: An if block reads the response (or received message) of the step just before it. Put a request or a wait-for-message step above this block.");
     expect(msgs([step({ id: "a", url: "http://x" }), iff({ id: "if2", when: [] })])).toEqual(["error: This if block has no condition yet.", "warning: This if block has no requests yet."]);
     expect(msgs([step({ id: "a", url: "http://x" }), lane, step({ id: "b", url: "http://x/{{maybe}}" })])).toEqual([
       "warning: {{maybe}} comes from a request inside an if block, so it's empty when that lane doesn't run.",
@@ -229,5 +229,79 @@ describe("redaction", () => {
       ["Authorization", "••••••"],
       ["X-Trace", "abc ••••••"],
     ]);
+  });
+});
+
+describe("queue steps", () => {
+  const brokers = { rabbit: { type: "rabbitmq" as const, url: "amqp://guest:{{token}}@localhost:5672" } };
+  const msg = (body: unknown, headers: [string, string][] = []): QueueMessage => {
+    const text = JSON.stringify(body);
+    return { source: "orders", routingKey: "order.created", headers, bodyText: text, bodyBase64: null, size: text.length, receivedAt: 1 };
+  };
+  const consume = (p: Partial<FlowStep> = {}, q: Partial<NonNullable<FlowStep["queue"]>> = {}): FlowStep => {
+    const s = blankQueueStep("queue.consume", "rabbit");
+    return { ...s, ...p, queue: { ...s.queue!, destination: "orders", timeoutMs: 3000, ...q } };
+  };
+
+  it("resolves the broker URL with secrets, and stamps published messages with trace headers", () => {
+    const s = { ...blankQueueStep("queue.publish", "rabbit"), queue: { ...blankQueueStep("queue.publish").queue!, broker: "rabbit", destination: "orders", body: '{"id":"{{$uuid}}"}' } };
+    const p = prepareQueue(s, src, brokers, true);
+    expect(p.broker).toEqual({ type: "rabbitmq", url: "amqp://guest:s3cret@localhost:5672" });
+    expect(p.usedSecrets).toEqual(["token"]);
+    expect(p.headers.map(([k]) => k)).toEqual(["X-Request-ID", "traceparent"]);
+    expect(p.traceId).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("waits across slices for the first message that passes the checks, then extracts from it", async () => {
+    let t = 0;
+    const calls: StepRequest[] = [];
+    const batches = [[msg({ status: "pending" })], [], [msg({ status: "paid", orderId: "o-7" })]];
+    const closed: string[] = [];
+    const s = consume({ checks: [{ left: "body.status", op: "==", right: '"paid"' }], extract: [{ key: "orderId", value: "body.orderId" }] });
+    const out = await runQueueStep(s, prepareQueue(s, src, brokers, false), { reqId: "r1", subscription: "run:s", traceIds: () => [] }, {
+      exec: async (req) => (calls.push(req), (t += 500), { kind: "queue.consume", messages: batches.shift() ?? [], skipped: 1 }),
+      cancel: async (id) => void closed.push(id),
+      cancelled: () => false,
+      now: () => t,
+    });
+    expect(out).toMatchObject({ state: "passed", extracted: [{ key: "orderId", value: "o-7" }], seen: 2, skipped: 3 });
+    expect(calls.every((c) => c.kind === "queue.consume" && c.id === "run:s")).toBe(true);
+    expect(closed).toEqual(["run:s"]);
+  });
+
+  it("fails after the timeout, saying how many messages didn't match, and asks only for this run's messages when told to", async () => {
+    let t = 0;
+    const seenIds: string[][] = [];
+    const s = consume({ checks: [{ left: "body.status", op: "==", right: '"paid"' }] }, { matchRun: true });
+    const out = await runQueueStep(s, prepareQueue(s, src, brokers, false), { reqId: "r1", traceIds: () => ["abc"] }, {
+      exec: async (req) => {
+        if (req.kind === "queue.consume") seenIds.push(req.traceIds);
+        t += 1000;
+        return { kind: "queue.consume", messages: [msg({ status: "pending" })], skipped: 0 };
+      },
+      cancel: async () => undefined,
+      cancelled: () => false,
+      now: () => t,
+    });
+    expect(out.state).toBe("failed");
+    expect(out.checks[0].got).toBe("none within 3s (3 other messages didn't match)");
+    expect(seenIds.every((ids) => ids[0] === "abc")).toBe(true);
+  });
+
+  it("an if block can read the message a consume step received", async () => {
+    const [t, e] = ids("t", "e");
+    const block = iff({ id: "if1", when: [{ left: "body.status", op: "==", right: '"paid"' }], then: [t], else: [e] });
+    const r = await runItems([consume({ id: "c" }), block], { ...hooks({ c: { state: "passed", message: msg({ status: "paid" }) } as Out }) });
+    expect(r.branches).toEqual({ if1: "then" });
+  });
+
+  it("validates brokers and destinations", () => {
+    const ctx: ValidateContext = { src, envName: "local", brokers };
+    const m = (s: FlowStep) => validateFlow([s], ctx).map((i) => i.message);
+    expect(m(consume({}, { broker: "nope" }))).toEqual(["There's no broker “nope” in “local”. Add it under Environment."]);
+    expect(m(consume({}, { destination: "" }))[0]).toContain("needs an exchange to listen on");
+    const pub = blankQueueStep("queue.publish", "rabbit");
+    expect(m(pub)[0]).toContain("no exchange or routing key");
+    expect(m({ ...pub, queue: { ...pub.queue!, routingKey: "orders" } })).toEqual([]);
   });
 });

@@ -11,6 +11,10 @@
  * `steps` is a list of requests and blocks: an `if` block runs one of two
  * lanes of requests depending on the previous response; a `parallel` block
  * sends its requests at once. Blocks hold requests only, never other blocks.
+ *
+ * A step is an HTTP request (`type: "http"`), or a message: `queue.publish`
+ * sends one to a RabbitMQ exchange or Kafka topic, `queue.consume` waits for one
+ * to arrive there. Queue steps keep their settings under `queue`.
  */
 
 export interface KV {
@@ -55,9 +59,30 @@ export interface Retry {
 
 export type OnFailure = "stop" | "continue";
 
+export type StepType = "http" | "queue.publish" | "queue.consume";
+
+/**
+ * A queue step. `destination` is a RabbitMQ exchange ("" is the default
+ * exchange) or a Kafka topic. Publish: `routingKey` (RabbitMQ) or `key` (Kafka),
+ * headers and body, with {{variables}}. Consume: `routingKey` is the binding
+ * pattern (RabbitMQ), and the step waits up to `timeoutMs` for a message that
+ * passes the step's checks, optionally only messages carrying this run's trace ids.
+ */
+export interface QueueSpec {
+  /** A broker named in the environment (`brokers`). */
+  broker: string;
+  destination: string;
+  routingKey: string;
+  key: string;
+  headers: KV[];
+  body: string;
+  matchRun: boolean;
+  timeoutMs: number;
+}
+
 export interface FlowStep {
   id: string;
-  type: "http";
+  type: StepType;
   name: string;
   method: string;
   url: string;
@@ -71,6 +96,8 @@ export interface FlowStep {
   retry: Retry | null;
   /** After this request fails: stop the flow (default) or carry on. */
   onFailure: OnFailure;
+  /** Queue steps only. */
+  queue: QueueSpec | null;
   /** Fields this version doesn't know, preserved. */
   rest: Record<string, unknown>;
 }
@@ -144,30 +171,39 @@ export interface NetworkRules {
 
 export const DEFAULT_NETWORK: NetworkRules = { allowPrivate: true, allowHosts: [] };
 
+/** A message broker queue steps can use. `url` may hold {{secret}} variables. */
+export interface Broker {
+  type: "rabbitmq" | "kafka";
+  /** RabbitMQ: `amqp://user:pass@host:5672/vhost`. Kafka: `host:9092`, comma-separated for several. */
+  url: string;
+}
+
 export interface EnvDoc {
   name: string;
   vars: Record<string, string>;
   baseUrls: Record<string, string>;
   insecureTls: boolean;
   network: NetworkRules;
+  brokers: Record<string, Broker>;
   /** From `<name>.secret.json`, never written to the shared file. */
   secrets: Record<string, string>;
 }
 
 const FLOW_KEYS = ["$schema", "version", "name", "steps", "trace", "services", "directions", "dismissed"];
-const STEP_KEYS = ["id", "type", "name", "http", "method", "url", "headers", "body", "timeoutMs", "extract", "checks", "wait", "poll", "retry", "onFailure"];
+const STEP_KEYS = ["id", "type", "name", "http", "queue", "method", "url", "headers", "body", "timeoutMs", "extract", "checks", "wait", "poll", "retry", "onFailure"];
 const BLOCK_KEYS = ["id", "type", "name", "when", "then", "else", "steps"];
 
-export const isStep = (i: FlowItem): i is FlowStep => i.type === "http";
+export const isStep = (i: FlowItem): i is FlowStep => i.type !== "if" && i.type !== "parallel";
+export const isQueue = (s: FlowStep) => s.type !== "http";
 
 /** Every request in run order (an if block's `then` lane before its `else` lane). */
 export function allSteps(items: FlowItem[]): FlowStep[] {
-  return items.flatMap((i) => (i.type === "http" ? [i] : i.type === "if" ? [...i.then, ...i.else] : i.steps));
+  return items.flatMap((i) => (isStep(i) ? [i] : i.type === "if" ? [...i.then, ...i.else] : i.steps));
 }
 
 /** Applies `fn` to every request, wherever it sits. */
 export function mapSteps(items: FlowItem[], fn: (s: FlowStep) => FlowStep): FlowItem[] {
-  return items.map((i) => (i.type === "http" ? fn(i) : i.type === "if" ? { ...i, then: i.then.map(fn), else: i.else.map(fn) } : { ...i, steps: i.steps.map(fn) }));
+  return items.map((i) => (isStep(i) ? fn(i) : i.type === "if" ? { ...i, then: i.then.map(fn), else: i.else.map(fn) } : { ...i, steps: i.steps.map(fn) }));
 }
 
 /** Removes a request or a block by id. */
@@ -182,7 +218,7 @@ export function removeItem(items: FlowItem[], id: string): FlowItem[] {
 export function addToLane(items: FlowItem[], lane: Lane, step: FlowStep): FlowItem[] {
   if (lane.block == null) return [...items, step];
   return items.map((i) => {
-    if (i.id !== lane.block || i.type === "http") return i;
+    if (i.id !== lane.block || isStep(i)) return i;
     if (i.type === "parallel") return { ...i, steps: [...i.steps, step] };
     return lane.lane === "else" ? { ...i, else: [...i.else, step] } : { ...i, then: [...i.then, step] };
   });
@@ -238,7 +274,16 @@ export function emptyBody(): StepBody {
 }
 
 export function blankStep(n: number, url = ""): FlowStep {
-  return { id: newStepId(), type: "http", name: `Request ${n}`, method: "GET", url, headers: [], body: emptyBody(), timeoutMs: 30_000, extract: [], checks: [], poll: null, retry: null, onFailure: "stop", rest: {} };
+  return { id: newStepId(), type: "http", name: `Request ${n}`, method: "GET", url, headers: [], body: emptyBody(), timeoutMs: 30_000, extract: [], checks: [], poll: null, retry: null, onFailure: "stop", queue: null, rest: {} };
+}
+
+export function blankQueueStep(type: "queue.publish" | "queue.consume", broker = ""): FlowStep {
+  return {
+    ...blankStep(0),
+    type,
+    name: type === "queue.publish" ? "Publish message" : "Wait for message",
+    queue: { broker, destination: "", routingKey: type === "queue.consume" ? "#" : "", key: "", headers: [], body: type === "queue.publish" ? "{}" : "", matchRun: false, timeoutMs: 15_000 },
+  };
 }
 
 export function blankBlock(type: FlowBlock["type"]): FlowBlock {
@@ -365,13 +410,17 @@ function parseItem(raw: Record<string, unknown>): FlowItem {
   return parseStep(raw);
 }
 
+function parseStep(raw: Record<string, unknown>): FlowStep {
+  return raw.type === "queue.publish" || raw.type === "queue.consume" ? parseQueue(raw, raw.type) : parseHttp(raw);
+}
+
 function parseRetry(r: unknown): Retry | null {
   if (!r || typeof r !== "object") return null;
   const o = r as Record<string, unknown>;
   return { max: Math.min(5, Math.max(1, Math.round(Number(o.max)) || 1)), backoffMs: Math.max(0, Number(o.backoffMs) || 500), on: o.on === "any" ? "any" : "errors" };
 }
 
-function parseStep(step: Record<string, unknown>): FlowStep {
+function parseHttp(step: Record<string, unknown>): FlowStep {
   // v2 keeps the request under `http`; v1 has it on the step itself.
   const req = step.http && typeof step.http === "object" ? (step.http as Record<string, unknown>) : step;
   const s: Record<string, unknown> = { ...step, ...req, poll: step.wait ?? step.poll };
@@ -397,6 +446,31 @@ function parseStep(step: Record<string, unknown>): FlowStep {
         : null,
     retry: parseRetry(step.retry),
     onFailure: step.onFailure === "continue" ? "continue" : "stop",
+    queue: null,
+    rest: pick(step, STEP_KEYS),
+  };
+}
+
+function parseQueue(step: Record<string, unknown>, type: "queue.publish" | "queue.consume"): FlowStep {
+  const q = (step.queue && typeof step.queue === "object" ? step.queue : {}) as Record<string, unknown>;
+  const base = blankQueueStep(type);
+  return {
+    ...base,
+    id: String(step.id ?? base.id),
+    name: String(step.name ?? base.name),
+    extract: toRows(step.extract),
+    checks: parseChecks(step.checks),
+    onFailure: step.onFailure === "continue" ? "continue" : "stop",
+    queue: {
+      broker: String(q.broker ?? ""),
+      destination: String(q.destination ?? ""),
+      routingKey: String(q.routingKey ?? (type === "queue.consume" ? "#" : "")),
+      key: String(q.key ?? ""),
+      headers: toRows(q.headers),
+      body: typeof q.body === "string" ? q.body : q.body === undefined ? "" : JSON.stringify(q.body, null, 2),
+      matchRun: q.matchRun === true,
+      timeoutMs: typeof q.timeoutMs === "number" ? q.timeoutMs : 15_000,
+    },
     rest: pick(step, STEP_KEYS),
   };
 }
@@ -406,6 +480,23 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
   const invalid: string[] = [];
   const prevSteps = previous ? allSteps(previous.steps) : [];
   const stepOut = (s: FlowStep) => {
+    if (s.queue) {
+      const q = s.queue;
+      return {
+        id: s.id,
+        type: s.type,
+        name: s.name,
+        queue: {
+          broker: q.broker,
+          destination: q.destination,
+          ...(q.routingKey ? { routingKey: q.routingKey } : {}),
+          ...(s.type === "queue.publish" ? { ...(q.key ? { key: q.key } : {}), headers: toObject(q.headers), body: q.body } : { matchRun: q.matchRun, timeoutMs: q.timeoutMs }),
+        },
+        ...(s.type === "queue.consume" ? { extract: toObject(s.extract), checks: s.checks.filter((c) => c.left.trim()).map(checkOut) } : {}),
+        ...(s.onFailure === "continue" ? { onFailure: "continue" } : {}),
+        ...s.rest,
+      };
+    }
     let body = serializeBody(s.body);
     if (!body.ok) {
       invalid.push(s.id);
@@ -427,7 +518,7 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
     };
   };
   const steps = doc.steps.map((i) =>
-    i.type === "http"
+    isStep(i)
       ? stepOut(i)
       : i.type === "if"
         ? { id: i.id, type: "if", name: i.name, when: i.when.filter((c) => c.left.trim()).map(checkOut), then: i.then.map(stepOut), else: i.else.map(stepOut), ...i.rest }
@@ -455,7 +546,11 @@ export function parseEnv(name: string, shared?: string, secret?: string): EnvDoc
   const str = (o: unknown) => Object.fromEntries(Object.entries((o as Record<string, unknown>) ?? {}).map(([k, v]) => [k, String(v ?? "")]));
   const n = (s.network ?? {}) as Record<string, unknown>;
   const network = { allowPrivate: n.allowPrivate !== false, allowHosts: Array.isArray(n.allowHosts) ? n.allowHosts.map(String).filter((h) => h.trim()) : [] };
-  return { name, vars: str(s.vars), baseUrls: str(s.baseUrls), insecureTls: s.insecureTls === true, network, secrets: str(x.vars) };
+  const brokers: Record<string, Broker> = {};
+  for (const [k, v] of Object.entries((s.brokers ?? {}) as Record<string, Record<string, unknown>>)) {
+    if (v && typeof v.url === "string") brokers[k] = { type: v.type === "kafka" ? "kafka" : "rabbitmq", url: v.url };
+  }
+  return { name, vars: str(s.vars), baseUrls: str(s.baseUrls), insecureTls: s.insecureTls === true, network, brokers, secrets: str(x.vars) };
 }
 
 export function serializeEnv(env: EnvDoc): { shared: string; secret: string } {
@@ -467,6 +562,7 @@ export function serializeEnv(env: EnvDoc): { shared: string; secret: string } {
           baseUrls: env.baseUrls,
           ...(env.insecureTls ? { insecureTls: true } : {}),
           ...(!env.network.allowPrivate || env.network.allowHosts.length ? { network: env.network } : {}),
+          ...(Object.keys(env.brokers).length ? { brokers: env.brokers } : {}),
         },
         null,
         2,

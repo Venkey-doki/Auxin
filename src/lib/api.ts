@@ -43,6 +43,33 @@ export interface HttpRequest {
   policy?: NetPolicy;
 }
 
+export type QueueBroker = { type: "rabbitmq" | "kafka"; url: string };
+
+/** A message received by a queue.consume step. */
+export interface QueueMessage {
+  source: string;
+  routingKey?: string | null;
+  key?: string | null;
+  partition?: number | null;
+  offset?: number | null;
+  headers: [string, string][];
+  bodyText: string | null;
+  bodyBase64: string | null;
+  size: number;
+  receivedAt: number;
+}
+
+/** What `step_exec` takes: one variant per step kind. */
+export type StepRequest =
+  | ({ kind: "http" } & HttpRequest)
+  | { kind: "queue.publish"; id: string; broker: QueueBroker; destination: string; routingKey: string | null; key: string | null; headers: [string, string][]; body: string; timeoutMs?: number; policy?: NetPolicy }
+  | { kind: "queue.consume"; id: string; broker: QueueBroker; source: string; binding: string | null; traceIds: string[]; waitMs: number; policy?: NetPolicy };
+
+export type StepResult =
+  | ({ kind: "http" } & HttpResponse)
+  | { kind: "queue.publish"; ms: number; destination: string; partition: number | null; offset: number | null }
+  | { kind: "queue.consume"; messages: QueueMessage[]; skipped: number };
+
 /** An environment's network rules (enforced in Rust): private addresses, and which public hosts. */
 export interface NetPolicy {
   allowPrivate: boolean;
@@ -85,6 +112,9 @@ export const api = {
   /** HTTP is the first step kind behind `step_exec`. */
   httpSend: (req: HttpRequest) => invoke<HttpResponse>("step_exec", { req: { kind: "http", ...req } }),
   httpCancel: (id: string) => invoke<boolean>("step_cancel", { id }),
+  stepExec: (req: StepRequest) => invoke<StepResult>("step_exec", { req }),
+  /** Aborts an in-flight step, and closes a consume subscription with this id. */
+  stepCancel: (id: string) => invoke<boolean>("step_cancel", { id }),
   httpDropJar: (id: string) => invoke<void>("http_drop_jar", { id }),
   auxinList: (root: string) => invoke<AuxinFile[]>("auxin_list", { root }),
   auxinWrite: (root: string, path: string, text: string) => invoke<void>("auxin_write", { root, path, text }),

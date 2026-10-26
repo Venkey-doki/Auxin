@@ -3,6 +3,7 @@ mod deps;
 mod http;
 mod netpolicy;
 mod process;
+mod queue;
 mod scan;
 mod steps;
 mod topology;
@@ -16,15 +17,15 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager as _, RunEvent, State};
 
 #[tauri::command]
-async fn step_exec(app: AppHandle, state: State<'_, Arc<http::HttpState>>, req: steps::StepRequest) -> Result<steps::StepResult, String> {
+async fn step_exec(app: AppHandle, state: State<'_, Arc<http::HttpState>>, queue: State<'_, Arc<queue::QueueState>>, req: steps::StepRequest) -> Result<steps::StepResult, String> {
     let temp = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("responses");
-    steps::exec(state.inner().clone(), req, temp).await
+    steps::exec(state.inner().clone(), queue.inner().clone(), req, temp).await
 }
 
-/// Cancels an in-flight step of any kind by its id.
+/// Cancels an in-flight step of any kind by its id, and closes a queue subscription with it.
 #[tauri::command]
-fn step_cancel(state: State<'_, Arc<http::HttpState>>, id: String) -> bool {
-    state.cancel(&id)
+fn step_cancel(state: State<'_, Arc<http::HttpState>>, queue: State<'_, Arc<queue::QueueState>>, id: String) -> bool {
+    state.cancel(&id) | queue.cancel(&id)
 }
 
 #[tauri::command]
@@ -172,6 +173,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(Arc::new(Manager::new(app.handle().clone())));
             app.manage(Arc::new(http::HttpState::default()));
+            app.manage(Arc::new(queue::QueueState::default()));
             app.manage(workspace_files::FileWatch::default());
             Ok(())
         })

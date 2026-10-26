@@ -1,0 +1,22 @@
+# Local brokers for the ignored queue integration tests:
+#   docker compose -f fixtures/brokers/docker-compose.yml up -d && cd src-tauri && cargo test -- --ignored queue
+# Override the targets with AUXIN_TEST_AMQP / AUXIN_TEST_KAFKA.
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  # Single-node Kafka-API broker; dev-container mode auto-creates topics.
+  redpanda:
+    image: redpandadata/redpanda:v26.2.4
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"

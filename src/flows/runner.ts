@@ -3,10 +3,10 @@
  * from earlier responses, polling, checks, extraction, trace headers, the trace
  * itself, run history, and the connection sampler during runs.
  */
-import { api, type HttpResponse } from "../lib/api";
+import { api, type HttpResponse, type QueueMessage } from "../lib/api";
 import { getLogs } from "../state/logs";
 import { selectServices, toast, useStore } from "../state/store";
-import { mask, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, validateFlow, type Issue } from "./engine";
+import { mask, prepareQueue, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, runQueueStep, validateFlow, type Issue, type QueueStepResult } from "./engine";
 import type { CheckResult } from "./eval";
 import { recordObserved } from "../map/store";
 import { allSteps, DEFAULT_NETWORK, parseFlow, serializeFlow, slugify, type FlowDoc, type FlowStep, type KV } from "./model";
@@ -41,6 +41,12 @@ export interface StepOutcome {
   /** Trace is computed after the grace period; `tracing` covers that wait. */
   tracing?: boolean;
   trace?: TraceResult;
+  /** Queue steps: the message received, or where a message was published. */
+  message?: QueueMessage;
+  published?: QueueStepResult["published"];
+  /** Consume: messages that didn't match, and messages from other runs left out. */
+  seen?: number;
+  skipped?: number;
 }
 
 export interface FlowRunState {
@@ -79,12 +85,17 @@ interface ExecContext {
   extra: Record<string, string>;
   jar: string;
   cancelled: () => boolean;
+  /** Consume steps in a run read from the subscription the run opened at its start. */
+  subscription?: string;
+  /** Trace and request ids of this run's steps so far, for "only messages from this run". */
+  traceIds: () => string[];
   /** Called with each in-flight HTTP id so a run can cancel it. */
   onInflight?: (id: string | null) => void;
 }
 
 /** Sends a step through the engine and mirrors its progress into the UI state. */
 async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<StepOutcome> {
+  if (step.queue) return executeQueue(doc, step, ctx);
   const key = rk(doc.path, step.id);
   const src = varSources(doc, ctx.extra);
   const reqId = newId();
@@ -139,6 +150,59 @@ async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<
   return o;
 }
 
+/** A queue step: publish a message, or wait for one. Shown in the UI like a request. */
+async function executeQueue(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<StepOutcome> {
+  const key = rk(doc.path, step.id);
+  const src = varSources(doc, ctx.extra);
+  const reqId = newId();
+  const envName = activeEnvName();
+  const env = get().envs[envName];
+  const prep = prepareQueue(step, src, env?.brokers ?? {}, doc.injectHeaders);
+  const q = step.queue!;
+  const where = q.destination || `(default exchange) ${q.routingKey}`;
+  const base: StepOutcome = {
+    state: "sending",
+    reqId,
+    sentAt: Date.now(),
+    method: step.type === "queue.publish" ? "PUB" : "SUB",
+    url: `${q.broker} · ${where}`,
+    headers: prep.headers.map(([k, v]): [string, string] => [k, mask(v, prep.usedSecrets, src)]),
+    checks: [],
+    extracted: [],
+    requestId: prep.requestId,
+    traceId: prep.traceId,
+  };
+  if (prep.missing.length) {
+    const o: StepOutcome = { ...base, state: "error", finishedAt: Date.now(), error: `Not sent: ${prep.missing.map((m) => `{{${m}}}`).join(", ")} has no value yet.` };
+    setOutcome(key, o);
+    return o;
+  }
+  setOutcome(key, base);
+  const result = await runQueueStep(
+    step,
+    prep,
+    { reqId, subscription: ctx.subscription, traceIds: ctx.traceIds, policy: { ...(env?.network ?? DEFAULT_NETWORK), env: envName } },
+    {
+      exec: (req) => {
+        ctx.onInflight?.(req.id);
+        return api.stepExec(req).finally(() => ctx.onInflight?.(null));
+      },
+      cancel: api.stepCancel,
+      cancelled: ctx.cancelled,
+    },
+  );
+  const o: StepOutcome = { ...base, ...result, finishedAt: Date.now() };
+  // Error text can echo a broker URL (and any secret resolved into it).
+  if (o.error) o.error = mask(o.error, prep.usedSecrets, src);
+  setOutcome(key, o);
+  return o;
+}
+
+/** The ids a consumer would carry if it passed on what this flow's steps sent. */
+function idsOf(outcomes: Iterable<StepOutcome | undefined>): string[] {
+  return [...outcomes].flatMap((o) => [o?.traceId, o?.requestId].filter((x): x is string => !!x));
+}
+
 /** The service a `{{name}}` refers to when it has no URL because its port isn't known yet. */
 function serviceWithoutPort(doc: FlowDoc, name: string): string | undefined {
   const services = selectServices(useStore.getState());
@@ -153,6 +217,7 @@ export function flowIssues(doc: FlowDoc): Issue[] {
   return validateFlow(doc.steps, {
     src: varSources(doc, {}),
     envName: activeEnvName(),
+    brokers: get().envs[activeEnvName()]?.brokers ?? {},
     explain: (name) => {
       const svc = serviceWithoutPort(doc, name);
       return svc ? portUnknown(svc) : undefined;
@@ -238,6 +303,7 @@ export async function sendStep(path: string, step: FlowStep) {
   const o = await execute(doc, step, {
     extra: get().extracted[path] ?? {},
     jar: sessionJar(path),
+    traceIds: () => idsOf(allSteps(doc.steps).map((s) => get().responses[rk(path, s.id)])),
     cancelled: () => cancelledSteps.has(key),
     onInflight: (id) => {
       if (id) inflight.set(key, id);
@@ -302,6 +368,9 @@ export async function runFlow(path: string, replay?: RunRecord) {
   const stopSampler = startConnectionSampler(path);
   const jar = `run:${runId}`;
   const extra: Record<string, string> = {};
+  // Listen from the start of the run, so a message caused by an earlier step isn't missed.
+  const subscriptions = await openSubscriptions(doc, runId);
+  const runIds: string[] = [];
   const { outcomes, branches, status } = await runItems<StepOutcome>(doc.steps, {
     run: async (step) => {
       // Edits made while running apply to requests not sent yet (not in a replay).
@@ -311,6 +380,8 @@ export async function runFlow(path: string, replay?: RunRecord) {
         extra,
         jar,
         cancelled: () => cancelled,
+        subscription: subscriptions.get(step.id),
+        traceIds: () => runIds,
         onInflight: (id) => {
           if (mine) inflightIds.delete(mine);
           mine = id;
@@ -318,6 +389,7 @@ export async function runFlow(path: string, replay?: RunRecord) {
         },
       });
       for (const e of o.extracted) extra[e.key] = e.value;
+      runIds.push(...idsOf([o]));
       return o;
     },
     notRun: (step, why) => {
@@ -328,6 +400,8 @@ export async function runFlow(path: string, replay?: RunRecord) {
     isCancelled: () => cancelled,
   });
   stopSampler();
+  // Consume steps close their own; this catches the ones that were skipped.
+  subscriptions.forEach((sub) => void api.stepCancel(sub).catch(() => undefined));
   runCancel.delete(path);
   void api.httpDropJar(jar).catch(() => undefined);
 
@@ -343,6 +417,29 @@ export async function runFlow(path: string, replay?: RunRecord) {
   });
   await saveHistory(path, doc, runId, env, startedAt, status, final, branches, replay?.runId);
   set((s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], historySavedAt: Date.now() } } }));
+}
+
+/** Opens a subscription for each consume step whose broker is set up; failures surface at the step itself. */
+async function openSubscriptions(doc: FlowDoc, runId: string): Promise<Map<string, string>> {
+  const envName = activeEnvName();
+  const env = get().envs[envName];
+  const subs = new Map<string, string>();
+  await Promise.all(
+    allSteps(doc.steps)
+      .filter((s) => s.type === "queue.consume")
+      .map(async (s) => {
+        const prep = prepareQueue(s, varSources(doc, {}), env?.brokers ?? {}, false);
+        if (!prep.broker || prep.missing.length) return;
+        const id = `${runId}:${s.id}`;
+        try {
+          await api.stepExec({ kind: "queue.consume", id, broker: prep.broker, source: prep.destination, binding: prep.routingKey || null, traceIds: [], waitMs: 0, policy: { ...(env?.network ?? DEFAULT_NETWORK), env: envName } });
+          subs.set(s.id, id);
+        } catch {
+          /* the step will try again and report the problem */
+        }
+      }),
+  );
+  return subs;
 }
 
 /** Runs the flow as it was saved in `rec`, with the current environment. */
@@ -420,8 +517,8 @@ async function saveHistory(path: string, doc: FlowDoc, runId: string, env: strin
     branches,
     steps: allSteps(doc.steps).map((st, i) => {
       const o = outcomes[i];
-      const reqBody = o?.res || o?.state === "error" ? redactBody(requestBodyText(st), secrets) : undefined;
-      const resBody = redactBody(o?.res?.bodyText, secrets);
+      const reqBody = o?.res || o?.published || o?.state === "error" ? redactBody(requestBodyText(st), secrets) : undefined;
+      const resBody = redactBody(o?.res?.bodyText ?? o?.message?.bodyText, secrets);
       return {
         id: st.id,
         name: st.name,
@@ -440,6 +537,7 @@ async function saveHistory(path: string, doc: FlowDoc, runId: string, env: strin
         hops: (o?.trace?.hops ?? []).map((h) => ({ alias: h.alias, ms: h.ms, ok: h.ok })),
         ...(o && o.state !== "queued" && o.state !== "skipped" && o.state !== "cancelled" ? { request: { headers: redactHeaders(o.headers, secrets), ...(reqBody ? { body: reqBody.body, truncated: reqBody.truncated } : {}) } } : {}),
         ...(o?.res ? { response: { status: o.res.status, headers: redactHeaders(o.res.headers, secrets), ...(resBody ? { body: resBody.body, truncated: resBody.truncated || o.res.truncated } : {}) } } : {}),
+        ...(o?.message ? { response: { status: 0, headers: redactHeaders(o.message.headers, secrets), ...(resBody ? { body: resBody.body, truncated: resBody.truncated } : {}) } } : {}),
       };
     }),
   };
@@ -468,6 +566,7 @@ export async function loadHistory(path: string): Promise<RunRecord[]> {
 
 /** The request body as written in the flow (variables unresolved, so no secret values). */
 function requestBodyText(st: FlowStep): string | undefined {
+  if (st.queue) return st.type === "queue.publish" ? st.queue.body : undefined;
   if (st.body.kind === "json" || st.body.kind === "text") return st.body.text;
   if (st.body.kind === "form") return st.body.form.map((f) => `${f.key}=${f.value}`).join("&");
   if (st.body.kind === "file") return `@${st.body.file}`;

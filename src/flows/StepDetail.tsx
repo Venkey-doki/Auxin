@@ -14,6 +14,7 @@ import { formatClock, SERVICE_COLORS } from "../lib/util";
 import { selectServices, startService, toast, useStore } from "../state/store";
 import { allSteps, CHECK_OPS, outsideWorkspace, type BodyKind, type Check, type CheckOp, type FlowDoc, type FlowStep } from "./model";
 import { formatBytes, formatMs, Json, KVTable, METHOD_COLOR, METHODS, Tabs, VarInput } from "./parts";
+import { QueueDetail } from "./QueueDetail";
 import { cancelStep, sendStep, type StepOutcome } from "./runner";
 import { rk, serviceIdFor, updateStep, useFlows, varSources } from "./store";
 import type { TraceLine } from "./trace";
@@ -42,7 +43,12 @@ function useServiceColors(doc: FlowDoc) {
   }, [services, doc.services]);
 }
 
-export function StepDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; step: FlowStep; locked: boolean; onRemove: () => void }) {
+/** An open step: a request editor, or a queue step's (publish / wait for a message). */
+export function StepDetail(props: { doc: FlowDoc; step: FlowStep; locked: boolean; onRemove: () => void }) {
+  return props.step.queue ? <QueueDetail {...props} /> : <HttpDetail {...props} />;
+}
+
+function HttpDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; step: FlowStep; locked: boolean; onRemove: () => void }) {
   const path = doc.path;
   const out = useFlows((s) => s.responses[rk(path, step.id)]);
   const invalid = useFlows((s) => s.invalid[rk(path, step.id)]);
@@ -173,8 +179,8 @@ export function StepDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; step
   );
 }
 
-/** `note` is shown under the rows once there are checks; `empty` before. */
-export function ChecksEditor({ checks, onChange, note, empty }: { checks: Check[]; onChange: (c: Check[]) => void; note?: string; empty?: string }) {
+/** `note` is shown under the rows once there are checks; `empty` before. `first` is the row "Add check" starts with. */
+export function ChecksEditor({ checks, onChange, note, empty, first = { left: "status", op: "==", right: "200" } }: { checks: Check[]; onChange: (c: Check[]) => void; note?: string; empty?: string; first?: Check }) {
   const cell = "h-8 w-full bg-transparent px-2.5 font-mono text-sm text-fg outline-none placeholder:text-fg-3 focus:bg-rail";
   return (
     <div className="grid gap-2">
@@ -223,7 +229,7 @@ export function ChecksEditor({ checks, onChange, note, empty }: { checks: Check[
         })}
         <button
           className="flex h-8 w-full items-center gap-1.5 px-2.5 text-sm text-fg-3 hover:bg-surface-2 hover:text-fg-2"
-          onClick={() => onChange([...checks, { left: checks.length ? "" : "status", op: "==", right: checks.length ? "" : "200" }])}
+          onClick={() => onChange([...checks, checks.length ? { left: "", op: "==", right: "" } : first])}
         >
           <Plus className="size-3.5" /> Add check
         </button>
@@ -234,7 +240,7 @@ export function ChecksEditor({ checks, onChange, note, empty }: { checks: Check[
 }
 
 /** A small number field inside a sentence; `inputClass` alone would stretch it to full width. */
-const inlineInput = inputClass.replace("w-full ", "");
+export const inlineInput = inputClass.replace("w-full ", "");
 
 function PollEditor({ step, onChange }: { step: FlowStep; onChange: (p: FlowStep["poll"]) => void }) {
   const p = step.poll;
@@ -333,18 +339,27 @@ function RetryEditor({ step, onChange }: { step: FlowStep; onChange: (p: Partial
           </>
         )}
       </div>
-      <div className="grid gap-2 border-t border-line pt-4">
-        <span className="text-fg-2">If this request still fails</span>
-        <Seg label="If this request fails">
-          <SegButton active={step.onFailure === "stop"} onClick={() => onChange({ onFailure: "stop" })}>
-            Stop the flow
-          </SegButton>
-          <SegButton active={step.onFailure === "continue"} onClick={() => onChange({ onFailure: "continue" })}>
-            Keep going
-          </SegButton>
-        </Seg>
-        <span className="text-xs text-fg-3">Either way the run is marked failed. Keep going is for cleanup or best-effort requests.</span>
+      <div className="border-t border-line pt-4">
+        <OnFailureEditor step={step} onChange={onChange} />
       </div>
+    </div>
+  );
+}
+
+/** What the flow does after this step fails. */
+export function OnFailureEditor({ step, onChange }: { step: FlowStep; onChange: (p: Partial<FlowStep>) => void }) {
+  return (
+    <div className="grid gap-2 text-sm">
+      <span className="text-fg-2">If this step still fails</span>
+      <Seg label="If this step fails">
+        <SegButton active={step.onFailure === "stop"} onClick={() => onChange({ onFailure: "stop" })}>
+          Stop the flow
+        </SegButton>
+        <SegButton active={step.onFailure === "continue"} onClick={() => onChange({ onFailure: "continue" })}>
+          Keep going
+        </SegButton>
+      </Seg>
+      <span className="text-xs text-fg-3">Either way the run is marked failed. Keep going is for cleanup or best-effort steps.</span>
     </div>
   );
 }

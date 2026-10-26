@@ -3,7 +3,7 @@
  * Linear-style rows that open into an Insomnia-style request | response split
  * with the request's trace. docs/flows-spec.md §7.
  */
-import { ChevronRight, ClipboardPaste, GripVertical, History, Play, Plus, Rows3, Settings2, Split, Square, Trash2, TriangleAlert } from "lucide-react";
+import { ChevronRight, ClipboardPaste, GripVertical, History, Inbox, Play, Plus, Rows3, Send, Settings2, Split, Square, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { EditableTitle } from "../components/GroupView";
 import { StatusMark, STATUS_TEXT, type Shown } from "../components/status";
@@ -14,7 +14,7 @@ import { useStore } from "../state/store";
 import { EnvPanel } from "./EnvPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import type { Issue } from "./engine";
-import { addToLane, allSteps, blankBlock, blankStep, DEFAULT_NETWORK, moveItem, outsideWorkspace, removeItem, type BodyKind, type FlowBlock, type FlowDoc, type FlowStep, type Lane } from "./model";
+import { addToLane, allSteps, blankBlock, blankQueueStep, blankStep, DEFAULT_NETWORK, isStep, moveItem, outsideWorkspace, removeItem, type BodyKind, type FlowBlock, type FlowDoc, type FlowStep, type Lane } from "./model";
 import { formatBytes, formatMs, MethodBadge } from "./parts";
 import { cancelRun, flowIssues, isRunning, runFlow, sendStep } from "./runner";
 import { ServiceMap } from "./ServiceMap";
@@ -86,7 +86,7 @@ export function FlowScreen({ path }: { path: string }) {
   const issues = flowIssues(doc);
   const number = (id: string) => steps.findIndex((s) => s.id === id) + 1;
   // Ids in the order rows appear, so a drag downward lands after its target.
-  const order = doc.steps.flatMap((i) => [i.id, ...(i.type === "http" ? [] : allSteps([i]).map((s) => s.id))]);
+  const order = doc.steps.flatMap((i) => [i.id, ...(isStep(i) ? [] : allSteps([i]).map((s) => s.id))]);
   const dragTo = (target: string) => {
     if (!dragId || dragId === target) return;
     const down = order.indexOf(dragId) < order.indexOf(target);
@@ -182,7 +182,7 @@ export function FlowScreen({ path }: { path: string }) {
               {doc.steps.length > 0 && (
                 <div className="overflow-hidden rounded-lg border border-line">
                   {doc.steps.map((item) =>
-                    item.type === "http" ? (
+                    isStep(item) ? (
                       stepRow(item)
                     ) : (
                       <BlockView
@@ -218,7 +218,8 @@ function RunSummary({ doc }: { doc: FlowDoc }) {
   if (!run) return null;
   const steps = allSteps(doc.steps);
   const outs = steps.map((s) => responses[rk(doc.path, s.id)]);
-  const total = outs.reduce((a, o) => a + (o?.res?.totalMs ?? 0), 0);
+  // Wall-clock time of the run: it includes waits (polls, messages) that no response time shows.
+  const total = run.finishedAt ? run.finishedAt - run.startedAt : outs.reduce((a, o) => a + (o?.res?.totalMs ?? 0), 0);
   const done = outs.filter((o) => o?.state === "passed").length;
   // Requests in a lane that wasn't taken never run; they don't count toward "all passed".
   const ran = outs.filter((o) => o && o.state !== "skipped").length;
@@ -248,7 +249,7 @@ function IssueStrip({ doc, issues, number, onOpen }: { doc: FlowDoc; issues: Iss
   const shown = all ? issues : issues.slice(0, 4);
   const label = (id: string) => {
     const n = number(id);
-    if (n) return `Request ${n}`;
+    if (n) return `${allSteps(doc.steps).find((s) => s.id === id)?.queue ? "Step" : "Request"} ${n}`;
     return doc.steps.find((i) => i.id === id)?.type === "if" ? "If block" : "Parallel block";
   };
   return (
@@ -354,9 +355,9 @@ function StepRow({
         <button onClick={onToggle} aria-expanded={open} className="flex h-full min-w-0 flex-1 items-center gap-3 text-left">
           <ChevronRight className={cx("size-3.5 flex-none text-fg-3 transition-transform", open && "rotate-90")} />
           <span className="w-5 flex-none font-mono text-xs text-fg-3 tabular-nums">{n}</span>
-          <MethodBadge method={step.method} />
+          <MethodBadge method={step.queue ? (step.type === "queue.publish" ? "PUB" : "SUB") : step.method} />
           <span className="flex-none text-base font-medium">{step.name}</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-3">{step.url}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-3">{step.queue ? [step.queue.broker, step.queue.destination || "default exchange", step.queue.routingKey].filter(Boolean).join(" · ") : step.url}</span>
           {issue && (
             <span title={issue.message} className="flex-none">
               <TriangleAlert className={cx("size-3.5", issue.level === "error" ? "text-bad-soft" : "text-warm")} aria-label={issue.message} />
@@ -368,7 +369,7 @@ function StepRow({
             </span>
           )}
           {step.poll && <span className="flex-none rounded bg-surface-3 px-1.5 text-xs text-fg-2">poll</span>}
-          {step.retry && (
+          {step.retry && !step.queue && (
             <span className="flex-none rounded bg-surface-3 px-1.5 text-xs text-fg-2" title={`Re-sent up to ${step.retry.max} more times ${step.retry.on === "any" ? "if it fails" : "on errors and 5xx"}`}>
               retry ×{step.retry.max}
             </span>
@@ -547,13 +548,15 @@ function AddRequest({ doc, onAdded }: { doc: FlowDoc; onAdded: (id: string) => v
   const add = (step: FlowStep) => {
     updateFlow(doc.path, (f) => ({ ...f, steps: [...f.steps, step] }));
     onAdded(step.id);
+    setMode("closed");
   };
   const addBlock = (type: FlowBlock["type"]) => updateFlow(doc.path, (f) => ({ ...f, steps: [...f.steps, blankBlock(type)] }));
+  const addQueue = (type: "queue.publish" | "queue.consume") => add(blankQueueStep(type, Object.keys(envs[envName]?.brokers ?? {})[0] ?? ""));
 
   const addFromCurl = async () => {
     if (!plan) return;
     if (Object.keys(plan.newSecrets).length) {
-      const env = envs[envName] ?? { name: envName, vars: {}, baseUrls: {}, insecureTls: false, network: DEFAULT_NETWORK, secrets: {} };
+      const env = envs[envName] ?? { name: envName, vars: {}, baseUrls: {}, insecureTls: false, network: DEFAULT_NETWORK, brokers: {}, secrets: {} };
       await saveEnv({ ...env, secrets: { ...env.secrets, ...plan.newSecrets } });
     }
     let kind: BodyKind = "none";
@@ -606,6 +609,13 @@ function AddRequest({ doc, onAdded }: { doc: FlowDoc; onAdded: (id: string) => v
         </Button>
         <Button variant="ghost" onClick={() => addBlock("parallel")} title="Send several requests at the same time">
           <Rows3 /> Parallel block
+        </Button>
+        <span className="mx-1 w-px self-stretch bg-line" aria-hidden />
+        <Button variant="ghost" onClick={() => addQueue("queue.publish")} title="Send a message to a RabbitMQ exchange or Kafka topic">
+          <Send /> Publish
+        </Button>
+        <Button variant="ghost" onClick={() => addQueue("queue.consume")} title="Wait for a message on a RabbitMQ exchange or Kafka topic">
+          <Inbox /> Wait for message
         </Button>
       </div>
     );
@@ -661,9 +671,17 @@ function AddRequest({ doc, onAdded }: { doc: FlowDoc; onAdded: (id: string) => v
             <Plus /> Add request
           </Button>
           {empty ? (
-            <Button variant="ghost" onClick={() => add(blankStep(1, ""))}>
-              Blank request
-            </Button>
+            <>
+              <Button variant="ghost" onClick={() => add(blankStep(1, ""))}>
+                Blank request
+              </Button>
+              <Button variant="ghost" onClick={() => addQueue("queue.publish")}>
+                <Send /> Publish
+              </Button>
+              <Button variant="ghost" onClick={() => addQueue("queue.consume")}>
+                <Inbox /> Wait for message
+              </Button>
+            </>
           ) : (
             <Button variant="ghost" onClick={() => setMode("closed")}>
               Cancel

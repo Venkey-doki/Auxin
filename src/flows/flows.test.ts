@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseCurl, toCurl } from "../lib/curl";
-import { blankStep, isStep, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow } from "./model";
+import { blankQueueStep, blankStep, isStep, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow } from "./model";
 import { resolve, resolveHidingSecrets, templatize, type VarSources } from "./vars";
 
 const USER_PATCH = `curl --request PATCH \\
@@ -157,6 +157,24 @@ describe("flow files", () => {
     expect(JSON.parse(once).steps.filter(isStep)[0]).not.toHaveProperty("wait");
     expect(JSON.parse(once).steps.filter(isStep)[0]).not.toHaveProperty("method");
     expect(serializeFlow(parseFlow("flows/v2.flow.json", once)).text).toBe(once);
+  });
+
+  it("queue steps and brokers round-trip", () => {
+    const f = newFlow("flows/q.flow.json", "Q");
+    const pub = blankQueueStep("queue.publish", "rabbit");
+    const sub = blankQueueStep("queue.consume", "rabbit");
+    f.steps = [
+      { ...pub, id: "p", queue: { ...pub.queue!, destination: "orders", routingKey: "order.created", headers: [{ key: "x-tenant", value: "{{tenant}}" }], body: '{"id": {{n}}}' } },
+      { ...sub, id: "c", queue: { ...sub.queue!, destination: "orders", matchRun: true, timeoutMs: 5000 }, checks: [{ left: "body.status", op: "==", right: '"paid"' }] },
+    ];
+    const text = serializeFlow(f).text;
+    const disk = JSON.parse(text);
+    expect(disk.steps[0]).toEqual({ id: "p", type: "queue.publish", name: "Publish message", queue: { broker: "rabbit", destination: "orders", routingKey: "order.created", headers: { "x-tenant": "{{tenant}}" }, body: '{"id": {{n}}}' } });
+    expect(disk.steps[1].queue).toEqual({ broker: "rabbit", destination: "orders", routingKey: "#", matchRun: true, timeoutMs: 5000 });
+    expect(serializeFlow(parseFlow(f.path, text)).text).toBe(text);
+    const env = parseEnv("local", JSON.stringify({ vars: {}, brokers: { rabbit: { type: "rabbitmq", url: "amqp://localhost" }, events: { type: "kafka", url: "localhost:9092" }, bad: { type: "x" } } }));
+    expect(env.brokers).toEqual({ rabbit: { type: "rabbitmq", url: "amqp://localhost" }, events: { type: "kafka", url: "localhost:9092" } });
+    expect(JSON.parse(serializeEnv(env).shared).brokers).toEqual(env.brokers);
   });
 
   it("environments keep secrets out of the shared file", () => {

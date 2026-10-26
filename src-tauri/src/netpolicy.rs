@@ -181,6 +181,18 @@ impl NetPolicy {
             _ => Ok(ok),
         }
     }
+
+    /// The addresses of `host:port` this policy allows, for clients that dial
+    /// sockets rather than URLs (message brokers). Blocking: it resolves DNS.
+    /// Empty when the name doesn't resolve.
+    pub fn check_host(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, Blocked> {
+        let raw = host.trim_start_matches('[').trim_end_matches(']');
+        if let Ok(ip) = raw.parse::<IpAddr>() {
+            let s = ip.to_string();
+            return self.judge(classify(ip), &s, &s).map(|()| vec![SocketAddr::new(ip, port)]);
+        }
+        self.filter(raw, (raw, port).to_socket_addrs().map(Iterator::collect).unwrap_or_default())
+    }
 }
 
 /// DNS resolver that only hands reqwest addresses the policy allows.
@@ -299,6 +311,21 @@ mod tests {
         let r = Resolver(Arc::new(policy(true)));
         let addrs: Vec<_> = tauri::async_runtime::block_on(r.resolve(Name::from_str("localhost").unwrap())).ok().unwrap().collect();
         assert!(addrs.iter().all(|a| a.ip().is_loopback()) && !addrs.is_empty(), "{addrs:?}");
+    }
+
+    #[test]
+    fn check_host_applies_the_same_rules() {
+        let (on, off) = (policy(true), policy(false));
+        assert_eq!(on.check_host("127.0.0.1", 5672).unwrap(), vec![SocketAddr::from(([127, 0, 0, 1], 5672))]);
+        assert_eq!(on.check_host("[::1]", 9092).unwrap(), vec![SocketAddr::from((Ipv6Addr::LOCALHOST, 9092))]);
+        assert!(on.check_host("localhost", 9092).unwrap().iter().all(|a| a.ip().is_loopback() && a.port() == 9092));
+        assert_eq!(on.check_host("169.254.169.254", 80).unwrap_err().0, "Blocked by the network rules of “staging”: 169.254.169.254 is a cloud metadata address.");
+        assert!(on.check_host("metadata.google.internal", 80).is_err());
+        assert!(off.check_host("localhost", 5672).unwrap_err().0.contains("localhost is a private address"));
+        assert!(off.check_host("10.0.0.5", 5672).unwrap_err().0.contains("10.0.0.5 is a private address"));
+        let only = NetPolicy { allow_private: true, allow_hosts: vec!["*.example.com".into()], env: String::new() };
+        assert_eq!(only.check_host("8.8.8.8", 9092).unwrap_err().0, "Blocked by the network rules: 8.8.8.8 isn't in this environment's allowed hosts.");
+        assert!(on.check_host("no-such-host.invalid", 5672).unwrap().is_empty());
     }
 
     #[test]

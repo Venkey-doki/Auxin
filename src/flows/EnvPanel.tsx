@@ -1,9 +1,9 @@
 /** Side panel for the active environment: variables, secrets, service URLs. */
 import { Plus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, cx, IconButton, Switch } from "../components/ui";
+import { Button, cx, IconButton, inputClass, Switch } from "../components/ui";
 import { selectServices, useStore } from "../state/store";
-import { parseEnv, type EnvDoc, type KV, type NetworkRules } from "./model";
+import { parseEnv, type Broker, type EnvDoc, type KV, type NetworkRules } from "./model";
 import { KVTable } from "./parts";
 import { activeEnvName, createEnv, saveEnv, servicePorts, setActiveEnv, useFlows } from "./store";
 
@@ -27,12 +27,13 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
   const [urls, setUrls] = useState<Record<string, string>>(env.baseUrls);
   const [insecure, setInsecure] = useState(env.insecureTls);
   const [allowPrivate, setAllowPrivate] = useState(env.network.allowPrivate);
+  const [brokers, setBrokers] = useState<BrokerRow[]>(() => brokerRows(env.brokers));
   /** Allowed hosts as typed, one per line; saved without blank lines. */
   const [hosts, setHosts] = useState(env.network.allowHosts.join("\n"));
   const [adding, setAdding] = useState<string | null>(null);
 
-  type Section = "vars" | "secrets" | "urls" | "insecure" | "network";
-  type Edits = Partial<{ vars: KV[]; secrets: KV[]; urls: Record<string, string>; insecure: boolean; network: NetworkRules }>;
+  type Section = "vars" | "secrets" | "urls" | "insecure" | "network" | "brokers";
+  type Edits = Partial<{ vars: KV[]; secrets: KV[]; urls: Record<string, string>; insecure: boolean; network: NetworkRules; brokers: BrokerRow[] }>;
   /** Unsaved edits, by section, for the env named in `pendingFor`. */
   const pendingEdits = useRef<Edits>({});
   const pendingFor = useRef(name);
@@ -56,6 +57,7 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
       ...(edits.urls ? { baseUrls: Object.fromEntries(Object.entries(edits.urls).filter(([, v]) => v.trim())) } : {}),
       ...(edits.insecure !== undefined ? { insecureTls: edits.insecure } : {}),
       ...(edits.network ? { network: edits.network } : {}),
+      ...(edits.brokers ? { brokers: Object.fromEntries(edits.brokers.filter((b) => b.name.trim()).map((b) => [b.name.trim(), { type: b.type, url: b.url }])) } : {}),
     };
     lastSaved.current = JSON.stringify(doc);
     void saveEnv(doc);
@@ -70,6 +72,7 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
       if (!only || only.has("secrets")) setSecrets(rows(env.secrets));
       if (!only || only.has("urls")) setUrls(env.baseUrls);
       if (!only || only.has("insecure")) setInsecure(env.insecureTls);
+      if (!only || only.has("brokers")) setBrokers(brokerRows(env.brokers));
       if (!only || only.has("network")) {
         setAllowPrivate(env.network.allowPrivate);
         setHosts(env.network.allowHosts.join("\n"));
@@ -85,7 +88,7 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
     // Our own save coming back from the store: keep the rows as typed (blank rows included).
     if (lastSaved.current === JSON.stringify(env)) return;
     // An outside change (curl import, git pull): refresh sections not being edited.
-    const untouched = new Set<Section>((["vars", "secrets", "urls", "insecure", "network"] as Section[]).filter((k) => !(k in pendingEdits.current)));
+    const untouched = new Set<Section>((["vars", "secrets", "urls", "insecure", "network", "brokers"] as Section[]).filter((k) => !(k in pendingEdits.current)));
     load(untouched);
   }, [name, env]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -199,6 +202,61 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
           </div>
         </Section>
 
+        <Section title="Brokers" note="for publish and wait-for-message steps">
+          <div className="grid gap-2">
+            {brokers.map((b, i) => {
+              const set = (p: Partial<BrokerRow>) => {
+                const next = brokers.map((x, j) => (j === i ? { ...x, ...p } : x));
+                setBrokers(next);
+                persist({ brokers: next });
+              };
+              return (
+                <div key={i} className="group grid gap-1.5 rounded-md border border-line p-2">
+                  <div className="flex items-center gap-1.5">
+                    <input className={cx(inputClass, "h-7 min-w-0 flex-1 font-mono text-sm")} value={b.name} placeholder="name, e.g. rabbit" onChange={(e) => set({ name: e.target.value })} aria-label="Broker name" spellCheck={false} />
+                    <select className={cx(inputClass.replace("w-full ", ""), "h-7 w-28 flex-none appearance-none text-sm")} value={b.type} onChange={(e) => set({ type: e.target.value as Broker["type"] })} aria-label="Broker type">
+                      <option value="rabbitmq">RabbitMQ</option>
+                      <option value="kafka">Kafka</option>
+                    </select>
+                    <IconButton
+                      size="sm"
+                      label="Remove broker"
+                      onClick={() => {
+                        const next = brokers.filter((_, j) => j !== i);
+                        setBrokers(next);
+                        persist({ brokers: next });
+                      }}
+                    >
+                      <X />
+                    </IconButton>
+                  </div>
+                  <input
+                    className={cx(inputClass, "h-7 font-mono text-sm")}
+                    value={b.url}
+                    placeholder={b.type === "kafka" ? "localhost:9092" : "amqp://guest:{{rabbitPass}}@localhost:5672"}
+                    onChange={(e) => set({ url: e.target.value })}
+                    aria-label="Broker address"
+                    spellCheck={false}
+                  />
+                </div>
+              );
+            })}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="justify-self-start"
+              onClick={() => {
+                const next = [...brokers, { name: brokers.length ? "" : "rabbit", type: "rabbitmq" as const, url: "amqp://guest:guest@localhost:5672" }];
+                setBrokers(next);
+                persist({ brokers: next });
+              }}
+            >
+              <Plus /> Add broker
+            </Button>
+            <span className="text-xs text-fg-3">Put passwords in a secret and write {"{{name}}"} in the address. The network rules below apply to brokers too.</span>
+          </div>
+        </Section>
+
         <Section title="Network">
           <div className="flex items-center gap-3">
             <span className="flex-1 text-sm text-fg-2">Allow localhost and private addresses</span>
@@ -246,6 +304,14 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
     </aside>
   );
 }
+
+interface BrokerRow {
+  name: string;
+  type: Broker["type"];
+  url: string;
+}
+
+const brokerRows = (b: Record<string, Broker>): BrokerRow[] => Object.entries(b).map(([name, x]) => ({ name, ...x }));
 
 const hostList = (text: string) =>
   text
