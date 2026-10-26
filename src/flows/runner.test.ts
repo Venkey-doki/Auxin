@@ -29,12 +29,12 @@ vi.mock("../lib/api", () => ({
 }));
 
 import { api } from "../lib/api";
-import { useMap } from "../map/store";
+import { editTopology, useMap } from "../map/store";
 import { appendLogs } from "../state/logs";
 import { useStore } from "../state/store";
 import { blankBlock, blankQueueStep, blankStep, isStep, newFlow, parseEnv, serializeFlow, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
 import { cancelRun, cancelStep, replayRun, runFlow, sendStep } from "./runner";
-import { activeEnvName, rk, saveEnv, syncWorkspace, updateFlow, useFlows } from "./store";
+import { activeEnvName, rk, saveEnv, saveEnvIn, sliceOf, syncWorkspace, updateFlow, useFlows } from "./store";
 
 const ROOT = "/w";
 const res = (status: number, body: unknown, extra: Partial<HttpResponse> = {}): HttpResponse => {
@@ -71,7 +71,8 @@ const out = (id: string) => useFlows.getState().responses[rk("flows/e2e.flow.jso
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(() => {
-  useMap.setState({ observed: [] });
+  // The map shows the workspace the runs belong to, as after the workspace loads.
+  useMap.setState({ root: ROOT, observed: [], broken: null });
   http.sent = [];
   http.writes = [];
   http.disk = [];
@@ -438,7 +439,7 @@ describe("queue steps in a run", () => {
 describe("OpenTelemetry spans", () => {
   it("a step's spans replace log hops with measured ones and add links to the map", async () => {
     useStore.setState({ otel: { port: 4318, fallback: false, error: null, spans: 2 } });
-    useMap.setState({ observed: [] });
+    useMap.setState({ root: ROOT, observed: [] });
     let asked: string[] = [];
     vi.mocked(api).otelSpans = vi.fn(async (ids: string[]) => {
       asked = ids;
@@ -501,5 +502,47 @@ describe("switching workspaces", () => {
     expect(useFlows.getState().runs[doc.path]).toMatchObject({ status: "passed" });
     expect(out("a").state).toBe("passed");
     expect(out("b").state).toBe("passed");
+  });
+});
+
+describe("saving to the right workspace", () => {
+  it("a map edit made just before switching is saved to the workspace it was made in", async () => {
+    setup([step({ id: "a", url: "{{gw}}/x" })]);
+    const write = vi.mocked(api.auxinWrite);
+    write.mockClear();
+    editTopology((t) => ({ ...t, positions: { gw: { x: 1, y: 2 } } }));
+    await syncWorkspace("/other");
+    await sleep(400);
+    const topo = write.mock.calls.filter(([, path]) => path === "topology.json");
+    expect(topo.map(([root]) => root)).toEqual([ROOT]);
+    expect(JSON.parse(topo[0][2]).positions).toEqual({ gw: { x: 1, y: 2 } });
+  });
+
+  it("an environment saved for a workspace you've left goes to that workspace, not the open one", async () => {
+    setup([step({ id: "a", url: "{{gw}}/x" })]);
+    await syncWorkspace("/other");
+    const write = vi.mocked(api.auxinWrite);
+    write.mockClear();
+    await saveEnvIn(ROOT, { ...parseEnv("local"), vars: { region: "EU-2" } });
+    expect(write.mock.calls.map(([root, path]) => [root, path])).toEqual([[ROOT, "env/local.json"]]);
+    expect(useFlows.getState().envs.local).toBeUndefined();
+    expect(sliceOf(ROOT)?.envs.local.vars).toEqual({ region: "EU-2" });
+  });
+
+  it("a topology.json that won't parse is never written over, and old flow links wait in their files", async () => {
+    vi.mocked(api.auxinRead).mockImplementation(async (_root: string, path: string) => (path === "topology.json" ? "<<<<<<< HEAD\n{}" : "{}"));
+    http.disk = [["flows/old.flow.json", JSON.stringify({ version: 1, name: "Old", services: [{ ref: "gw", alias: "gw" }, { ref: "model", alias: "model" }], directions: [{ from: "gw", to: "model", confirmed: true }], steps: [] })]];
+    const write = vi.mocked(api.auxinWrite);
+    await syncWorkspace(null);
+    write.mockClear();
+    await syncWorkspace(ROOT);
+    await sleep(50);
+    expect(useMap.getState().broken).toBeTruthy();
+    editTopology((t) => ({ ...t, positions: { gw: { x: 9, y: 9 } } }));
+    await sleep(400);
+    expect(write.mock.calls.filter(([, path]) => path === "topology.json")).toEqual([]);
+    // The flow keeps its links until the map can take them.
+    expect(write.mock.calls.filter(([, path]) => path === "flows/old.flow.json")).toEqual([]);
+    vi.mocked(api.auxinRead).mockImplementation(async () => "{}");
   });
 });

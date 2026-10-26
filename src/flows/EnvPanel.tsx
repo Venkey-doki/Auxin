@@ -5,7 +5,7 @@ import { Button, cx, IconButton, inputClass, Switch } from "../components/ui";
 import { selectServices, useStore } from "../state/store";
 import { parseEnv, type Broker, type EnvDoc, type KV, type NetworkRules } from "./model";
 import { KVTable } from "./parts";
-import { activeEnvName, createEnv, saveEnv, servicePorts, setActiveEnv, useFlows } from "./store";
+import { activeEnvName, createEnv, saveEnvIn, servicePorts, setActiveEnv, sliceOf, useFlows } from "./store";
 
 const rows = (o: Record<string, string>): KV[] => Object.entries(o).map(([key, value]) => ({ key, value }));
 const obj = (r: KV[]): Record<string, string> => Object.fromEntries(r.filter((x) => x.key.trim()).map((x) => [x.key.trim(), x.value]));
@@ -37,6 +37,8 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
   /** Unsaved edits, by section, for the env named in `pendingFor`. */
   const pendingEdits = useRef<Edits>({});
   const pendingFor = useRef(name);
+  /** The workspace those edits belong to: switching workspace must not save them into the next one. */
+  const pendingRoot = useRef(useFlows.getState().root);
   const timer = useRef<number | undefined>(undefined);
   /** The doc this panel last saved: its echo from the store must not reset the rows. */
   const lastSaved = useRef<string | null>(null);
@@ -49,7 +51,9 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
     if (!Object.keys(edits).length) return;
     pendingEdits.current = {};
     const target = pendingFor.current;
-    const latest = useFlows.getState().envs[target] ?? parseEnv(target);
+    const root = pendingRoot.current;
+    if (!root) return;
+    const latest = sliceOf(root)?.envs[target] ?? parseEnv(target);
     const doc: EnvDoc = {
       ...latest,
       ...(edits.vars ? { vars: obj(edits.vars) } : {}),
@@ -60,7 +64,7 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
       ...(edits.brokers ? { brokers: Object.fromEntries(edits.brokers.filter((b) => b.name.trim()).map((b) => [b.name.trim(), { type: b.type, url: b.url }])) } : {}),
     };
     lastSaved.current = JSON.stringify(doc);
-    void saveEnv(doc);
+    void saveEnvIn(root, doc);
   };
 
   // Save anything pending when the panel closes.
@@ -94,6 +98,7 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
 
   const persist = (next: Edits) => {
     pendingFor.current = name;
+    pendingRoot.current = useFlows.getState().root;
     pendingEdits.current = { ...pendingEdits.current, ...next };
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(flush, 350);

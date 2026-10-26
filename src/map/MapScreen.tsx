@@ -4,7 +4,7 @@
  * Edits here are shared through `.auxin/topology.json`; flows draw their own
  * maps from the same links.
  */
-import { ArrowRight, Code2, Database, Globe, Inbox, LayoutGrid, Monitor, Plus, Radar, RotateCcw, Server, Trash2, Zap, type LucideIcon } from "lucide-react";
+import { ArrowRight, Code2, Database, Globe, Inbox, LayoutGrid, Monitor, Plus, Radar, RotateCcw, Server, Trash2, TriangleAlert, Zap, type LucideIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Popover } from "../components/Popover";
 import { Button, cx, IconButton, inputClass, MenuLabel, Switch, TopBar } from "../components/ui";
@@ -26,6 +26,7 @@ export function MapScreen() {
   useStore((s) => s.config); // code scan consent lives in the workspace config
   const file = useMap((s) => s.file);
   const discovering = useMap((s) => s.discovering);
+  const broken = useMap((s) => s.broken);
   const { nodes, edges } = useTopology();
   const [panel, setPanel] = useState(true);
 
@@ -83,6 +84,15 @@ export function MapScreen() {
         </IconButton>
       </TopBar>
 
+      {broken && (
+        <div className="flex flex-none items-center gap-2 border-b border-bad/35 bg-bad/[0.07] px-5 py-2 text-sm" role="alert">
+          <TriangleAlert className="size-4 flex-none text-bad-soft" aria-hidden />
+          <span className="min-w-0 text-fg-2">
+            <span className="font-semibold text-bad-soft">.auxin/topology.json can't be read</span> ({broken}). Often a merge conflict. Your edits aren't saved until it's fixed, so
+            the file isn't overwritten.
+          </span>
+        </div>
+      )}
       <div className="flex min-h-0 flex-1">
         <div className="relative min-w-0 flex-1">
           <GraphCanvas

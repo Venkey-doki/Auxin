@@ -7,7 +7,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { api } from "../lib/api";
 import { activeWorkspace, selectServices, toast, updateActiveWorkspace, useStore } from "../state/store";
-import { updateFlow, useFlows, write, writeTo } from "../flows/store";
+import { updateFlow, useFlows, writeTo } from "../flows/store";
 import { emptyTopology, keepEdge, mergeTopology, removeEdge, parseTopology, serializeTopology, serviceKey, type Discovery, type Observation, type TopologyFile } from "./model";
 
 const TOPOLOGY = "topology.json";
@@ -19,9 +19,11 @@ interface MapState {
   observed: Observation[];
   discovery: Discovery | null;
   discovering: boolean;
+  /** Why `.auxin/topology.json` couldn't be read. While set, edits aren't saved, so the file isn't overwritten. */
+  broken: string | null;
 }
 
-export const useMap = create<MapState>(() => ({ root: null, file: emptyTopology(), observed: [], discovery: null, discovering: false }));
+export const useMap = create<MapState>(() => ({ root: null, file: emptyTopology(), observed: [], discovery: null, discovering: false, broken: null }));
 const set = useMap.setState;
 const get = useMap.getState;
 
@@ -33,7 +35,14 @@ let observedTimer: number | undefined;
 /** Maps of workspaces switched away from, so switching back doesn't scan again. */
 const parked = new Map<string, Pick<MapState, "file" | "observed" | "discovery">>();
 
-/** Writes waiting on a timer belong to the workspace being left: write them now, to it. */
+/**
+ * Writes waiting on a timer belong to the map's workspace: write them now. The
+ * flows store calls this before it switches workspace, so nothing lands in the next one.
+ */
+export function flushMap() {
+  if (get().root) flushTo(get().root!);
+}
+
 function flushTo(root: string) {
   if (saveTimer !== undefined) {
     window.clearTimeout(saveTimer);
@@ -56,19 +65,22 @@ export async function loadTopology(root: string) {
       flushTo(prev);
       parked.set(prev, { file: get().file, observed: get().observed, discovery: get().discovery });
     }
-    set({ root, file: emptyTopology(), observed: [], discovery: null, ...parked.get(root) });
+    set({ root, file: emptyTopology(), observed: [], discovery: null, broken: null, ...parked.get(root) });
     parked.delete(root);
     lastWritten = null;
   }
   const read = (p: string) => api.auxinRead(root, p).catch(() => null);
   const [text, obs] = await Promise.all([read(TOPOLOGY), read(OBSERVED)]);
   if (get().root !== root) return;
-  if (text != null && text !== lastWritten && saveTimer === undefined) {
+  if (text == null) set({ broken: null });
+  else if (text !== lastWritten && saveTimer === undefined) {
     try {
-      set({ file: parseTopology(text) });
+      set({ file: parseTopology(text), broken: null });
       lastWritten = text;
     } catch (e) {
-      toast("error", "Couldn't read .auxin/topology.json", String(e));
+      // Often a merge conflict. Keep the file as it is on disk until it's fixed.
+      if (!get().broken) toast("error", "Couldn't read .auxin/topology.json", `${String(e)}. Map edits aren't saved until the file is fixed.`);
+      set({ broken: String(e) });
     }
   }
   if (obs != null && observedTimer === undefined) {
@@ -88,6 +100,8 @@ export async function loadTopology(root: string) {
  * flow so they're written out of the file.
  */
 function adoptFlowLinks() {
+  // With topology.json unreadable, the links stay in the flow files until it's fixed.
+  if (get().broken) return;
   for (const doc of Object.values(useFlows.getState().flows)) {
     const legacy = doc.legacyLinks;
     if (!legacy) continue;
@@ -131,20 +145,28 @@ export async function discover() {
 
 /** Applies an edit to `.auxin/topology.json` now, and writes it shortly after (edits coalesce). */
 export function editTopology(fn: (t: TopologyFile) => TopologyFile) {
+  if (get().broken) {
+    toast("error", "Map edits can't be saved", `.auxin/topology.json can't be read (${get().broken}). Fix the file first, so it isn't overwritten.`);
+    return;
+  }
   set({ file: fn(get().file) });
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(() => {
     saveTimer = undefined;
+    const root = get().root;
     const text = serializeTopology(get().file);
-    if (text === lastWritten) return;
+    if (!root || text === lastWritten) return;
     lastWritten = text;
-    void write(TOPOLOGY, text);
+    void writeTo(root, TOPOLOGY, text);
   }, 300);
 }
 
-/** Records links a run showed (a traced request, an open connection). Kept for a week after last seen. */
-export function recordObserved(found: Omit<Observation, "lastSeen">[]) {
-  if (!found.length) return;
+/**
+ * Records links a run in `root` showed (a traced request, an open connection).
+ * Kept for a week after last seen. Ignored if the map now shows another workspace.
+ */
+export function recordObserved(root: string, found: Omit<Observation, "lastSeen">[]) {
+  if (!found.length || get().root !== root) return;
   const now = new Date().toISOString();
   const next = [...get().observed];
   for (const f of found) {
@@ -156,7 +178,7 @@ export function recordObserved(found: Omit<Observation, "lastSeen">[]) {
   window.clearTimeout(observedTimer);
   observedTimer = window.setTimeout(() => {
     observedTimer = undefined;
-    void write(OBSERVED, JSON.stringify(get().observed, null, 2) + "\n");
+    void writeTo(root, OBSERVED, JSON.stringify(get().observed, null, 2) + "\n");
   }, 1000);
 }
 

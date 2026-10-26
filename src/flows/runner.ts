@@ -294,10 +294,11 @@ function scheduleTrace(root: string, doc: FlowDoc, step: FlowStep, o: StepOutcom
     });
     // Spans, when the services send them, replace the log hops with measured ones.
     const spans = await fetchSpans(o);
+    if (get().root !== root) return patchOutcome(root, rk(doc.path, step.id), o.reqId, { tracing: false, trace });
     const hops = spans.length ? spanHops(spans, (name) => flowServiceNamed(doc, name)) : [];
     patchOutcome(root, rk(doc.path, step.id), o.reqId, { tracing: false, trace: hops.length ? { ...trace, hops, source: "otel" } : trace, ...(spans.length ? { spans } : {}) });
-    observe(doc, trace.traffic, "traffic", (from, to) => `Request ${o.requestId} was logged by ${from}, then by ${to}`);
-    observeSpans(spans, o.requestId);
+    observe(root, doc, trace.traffic, "traffic", (from, to) => `Request ${o.requestId} was logged by ${from}, then by ${to}`);
+    observeSpans(root, spans, o.requestId);
   })();
   pendingTraces.set(o.reqId, p);
   void p.finally(() => pendingTraces.delete(o.reqId));
@@ -318,15 +319,15 @@ function flowServiceNamed(doc: FlowDoc, name: string): { id: string; alias: stri
 }
 
 /** Links between services the spans prove go to the project map, by service folder. */
-function observeSpans(spans: Span[], requestId?: string) {
-  const root = get().root;
-  if (!spans.length || !root) return;
+function observeSpans(root: string, spans: Span[], requestId?: string) {
+  if (!spans.length || get().root !== root) return;
   const services = selectServices(useStore.getState());
   const key = (name: string) => {
     const svc = services.find((x) => x.name.toLowerCase() === name.toLowerCase());
     return svc ? serviceKey(svc, root) : undefined;
   };
   recordObserved(
+    root,
     spanLinks(spans).flatMap(([a, b]) => (key(a) && key(b) ? [{ from: key(a)!, to: key(b)!, source: "otel" as const, detail: `${a} called ${b} in the spans of ${requestId ?? "a request"}` }] : [])),
   );
 }
@@ -338,19 +339,19 @@ function scheduleSpans(root: string, doc: FlowDoc, step: FlowStep, o: StepOutcom
     await sleep(doc.graceMs);
     if (get().root !== root) return;
     const spans = await fetchSpans(o);
-    if (!spans.length) return;
+    if (!spans.length || get().root !== root) return;
     const hops = spanHops(spans, (name) => flowServiceNamed(doc, name));
     patchOutcome(root, rk(doc.path, step.id), o.reqId, { spans, trace: { lines: [], nearby: [], hops, matchedBy: [], unavailable: [], traffic: [], source: "otel" } });
-    observeSpans(spans, o.requestId);
+    observeSpans(root, spans, o.requestId);
   })();
   pendingTraces.set(o.reqId, p);
   void p.finally(() => pendingTraces.delete(o.reqId));
 }
 
 /** Hands links a run showed (by alias) to the project map (by service folder). */
-function observe(doc: FlowDoc, pairs: [string, string][], source: "traffic" | "connection", detail: (from: string, to: string) => string) {
+function observe(root: string, doc: FlowDoc, pairs: [string, string][], source: "traffic" | "connection", detail: (from: string, to: string) => string) {
   const ref = (alias: string) => doc.services.find((f) => f.alias === alias)?.ref;
-  recordObserved(pairs.flatMap(([a, b]) => (ref(a) && ref(b) ? [{ from: ref(a)!, to: ref(b)!, source, detail: detail(a, b) }] : [])));
+  recordObserved(root, pairs.flatMap(([a, b]) => (ref(a) && ref(b) ? [{ from: ref(a)!, to: ref(b)!, source, detail: detail(a, b) }] : [])));
 }
 
 /* ---------- single send ---------- */
@@ -690,7 +691,7 @@ function startConnectionSampler(path: string, root: string): () => void {
           const fresh = pairs.filter(([a, b]) => !seen.has(`${a}→${b}`));
           fresh.forEach(([a, b]) => seen.add(`${a}→${b}`));
           // Connections are only meaningful for the services of the open workspace.
-          if (get().root === root) observe(doc, fresh, "connection", (from, to) => `${from} held a TCP connection to ${to}'s port during a run`);
+          observe(root, doc, fresh, "connection", (from, to) => `${from} held a TCP connection to ${to}'s port during a run`);
         } catch {
           stopped = true; // sampling is optional; never break a run over it
         }

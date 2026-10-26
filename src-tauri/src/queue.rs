@@ -132,9 +132,11 @@ fn has_trace(headers: &[(String, String)], ids: &[String]) -> bool {
     })
 }
 
-/// Messages received for one subscription, waiting to be read.
+/// Messages received for one subscription, waiting to be read. Every message
+/// is kept until a read: a run opens its subscriptions before it knows its
+/// trace ids, so "only this run's messages" is decided per read, with the ids
+/// that read brings.
 struct Buffer {
-    trace_ids: Vec<String>,
     state: Mutex<Pending>,
     notify: Notify,
 }
@@ -148,17 +150,12 @@ struct Pending {
 }
 
 impl Buffer {
-    fn new(trace_ids: Vec<String>) -> Self {
-        let trace_ids = trace_ids.into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-        Buffer { trace_ids, state: Mutex::default(), notify: Notify::new() }
+    fn new() -> Self {
+        Buffer { state: Mutex::default(), notify: Notify::new() }
     }
 
     fn push(&self, m: Message) {
         let mut p = self.state.lock().unwrap();
-        if !self.trace_ids.is_empty() && !has_trace(&m.headers, &self.trace_ids) {
-            p.skipped = p.skipped.saturating_add(1);
-            return;
-        }
         if p.messages.len() >= BUFFER_CAP {
             p.messages.pop_front();
             p.skipped = p.skipped.saturating_add(1);
@@ -174,8 +171,14 @@ impl Buffer {
     }
 
     /// Drains what's buffered: `None` while there's nothing to report and `force` is off.
-    fn take(&self, force: bool) -> Option<Result<(Vec<Message>, u32), String>> {
+    /// With `ids`, messages that carry none of them are counted as skipped and dropped.
+    fn take(&self, ids: &[String], force: bool) -> Option<Result<(Vec<Message>, u32), String>> {
         let mut p = self.state.lock().unwrap();
+        if !ids.is_empty() {
+            let before = p.messages.len();
+            p.messages.retain(|m| has_trace(&m.headers, ids));
+            p.skipped = p.skipped.saturating_add((before - p.messages.len()) as u32);
+        }
         if p.messages.is_empty() {
             if let Some(e) = p.error.take() {
                 return Some(Err(e));
@@ -188,14 +191,18 @@ impl Buffer {
     }
 
     /// Returns as soon as there's a message (or an error), else empty at the deadline.
-    async fn wait(&self, wait: Duration) -> Result<(Vec<Message>, u32), String> {
+    async fn wait(&self, ids: &[String], wait: Duration) -> Result<(Vec<Message>, u32), String> {
         let deadline = tokio::time::Instant::now() + wait;
+        // Messages passed over in earlier rounds of this wait still count towards `skipped`.
+        let mut skipped = 0u32;
         loop {
-            if let Some(out) = self.take(false) {
-                return out;
+            match self.take(ids, false) {
+                Some(Ok((m, s))) if m.is_empty() => skipped = skipped.saturating_add(s),
+                Some(out) => return out.map(|(m, s)| (m, s.saturating_add(skipped))),
+                None => {}
             }
             if tokio::time::timeout_at(deadline, self.notify.notified()).await.is_err() {
-                return self.take(true).unwrap_or(Ok((Vec::new(), 0)));
+                return self.take(ids, true).unwrap_or(Ok((Vec::new(), 0))).map(|(m, s)| (m, s.saturating_add(skipped)));
             }
         }
     }
@@ -261,7 +268,7 @@ impl QueueState {
         let buf = match self.touch(&req.id) {
             Some(buf) => buf,
             None => {
-                let buf = Arc::new(Buffer::new(req.trace_ids.clone()));
+                let buf = Arc::new(Buffer::new());
                 let closer = match &req.broker {
                     Broker::Rabbitmq { url } => rabbit_subscribe(&req, url, buf.clone()).await?,
                     Broker::Kafka { url } => kafka_subscribe(&req, url, buf.clone()).await?,
@@ -270,7 +277,8 @@ impl QueueState {
                 buf
             }
         };
-        let out = buf.wait(Duration::from_millis(req.wait_ms)).await;
+        let ids: Vec<String> = req.trace_ids.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        let out = buf.wait(&ids, Duration::from_millis(req.wait_ms)).await;
         if out.is_err() {
             self.subs.lock().unwrap().remove(&req.id);
         } else {
@@ -757,33 +765,39 @@ mod tests {
 
     #[test]
     fn buffer_caps_and_counts_skipped() {
-        let buf = Buffer::new(Vec::new());
+        let buf = Buffer::new();
         for n in 0..BUFFER_CAP + 5 {
             buf.push(msg(n, &[]));
         }
-        let (messages, skipped) = buf.take(true).unwrap().unwrap();
+        let (messages, skipped) = buf.take(&[], true).unwrap().unwrap();
         assert_eq!((messages.len(), skipped), (BUFFER_CAP, 5));
         assert_eq!(messages[0].body_text.as_deref(), Some("5"));
-        assert_eq!(buf.take(true).unwrap().unwrap().1, 0);
-        assert!(buf.take(false).is_none());
+        assert_eq!(buf.take(&[], true).unwrap().unwrap().1, 0);
+        assert!(buf.take(&[], false).is_none());
     }
 
     #[test]
-    fn buffer_filters_by_trace_id() {
-        let buf = Buffer::new(vec![TRACE.into(), " ".into()]);
+    fn buffer_filters_by_the_ids_each_read_brings() {
+        // Opened with no ids (as a run does at its start); the read that knows the ids filters.
+        let buf = Buffer::new();
         buf.push(msg(1, &[("traceparent", &format!("00-{TRACE}-00f067aa0ba902b7-01"))]));
         buf.push(msg(2, &[("content-type", "application/json")]));
         buf.push(msg(3, &[("x-request-id", TRACE)]));
-        let (messages, skipped) = buf.take(true).unwrap().unwrap();
+        let (messages, skipped) = buf.take(&[TRACE.to_string()], true).unwrap().unwrap();
         assert_eq!(messages.iter().map(|m| m.body_text.clone().unwrap()).collect::<Vec<_>>(), ["1", "3"]);
+        assert_eq!(skipped, 1);
+        // A wait that only sees other runs' messages keeps waiting, then reports them as skipped.
+        buf.push(msg(4, &[]));
+        let (messages, skipped) = tauri::async_runtime::block_on(buf.wait(&[TRACE.to_string()], Duration::from_millis(60))).unwrap();
+        assert!(messages.is_empty());
         assert_eq!(skipped, 1);
     }
 
     #[test]
     fn wait_returns_early_or_empty_at_the_deadline() {
-        let buf = Arc::new(Buffer::new(Vec::new()));
+        let buf = Arc::new(Buffer::new());
         let started = Instant::now();
-        let (messages, _) = tauri::async_runtime::block_on(buf.wait(Duration::from_millis(80))).unwrap();
+        let (messages, _) = tauri::async_runtime::block_on(buf.wait(&[], Duration::from_millis(80))).unwrap();
         assert!(messages.is_empty() && started.elapsed() >= Duration::from_millis(80));
         let b2 = buf.clone();
         std::thread::spawn(move || {
@@ -791,13 +805,13 @@ mod tests {
             b2.push(msg(7, &[]));
         });
         let started = Instant::now();
-        let (messages, _) = tauri::async_runtime::block_on(buf.wait(Duration::from_secs(5))).unwrap();
+        let (messages, _) = tauri::async_runtime::block_on(buf.wait(&[], Duration::from_secs(5))).unwrap();
         assert_eq!(messages.len(), 1);
         assert!(started.elapsed() < Duration::from_secs(2));
         buf.push(msg(8, &[]));
         buf.fail("Lost the connection to Kafka at x:9092.".into());
-        assert_eq!(tauri::async_runtime::block_on(buf.wait(Duration::ZERO)).unwrap().0.len(), 1);
-        assert_eq!(tauri::async_runtime::block_on(buf.wait(Duration::ZERO)).unwrap_err(), "Lost the connection to Kafka at x:9092.");
+        assert_eq!(tauri::async_runtime::block_on(buf.wait(&[], Duration::ZERO)).unwrap().0.len(), 1);
+        assert_eq!(tauri::async_runtime::block_on(buf.wait(&[], Duration::ZERO)).unwrap_err(), "Lost the connection to Kafka at x:9092.");
     }
 
     fn sub(state: &QueueState, id: &str, idle: Duration) -> Arc<AtomicBool> {
@@ -805,7 +819,7 @@ mod tests {
         let c = closed.clone();
         let closer = Closer(Some(Box::new(move || c.store(true, Ordering::SeqCst))));
         let last_read = Instant::now().checked_sub(idle).unwrap();
-        state.subs.lock().unwrap().insert(id.into(), Sub { buf: Arc::new(Buffer::new(Vec::new())), last_read, _closer: closer });
+        state.subs.lock().unwrap().insert(id.into(), Sub { buf: Arc::new(Buffer::new()), last_read, _closer: closer });
         closed
     }
 
@@ -844,8 +858,10 @@ mod tests {
         tauri::async_runtime::block_on(state.clone().publish(serde_json::from_value(req).unwrap())).unwrap()
     }
 
+    /// Reads with this run's trace id, except when opening: a run opens before it knows its ids.
     fn consume(state: &Arc<QueueState>, broker: &serde_json::Value, source: &str, id: &str, wait_ms: u64) -> Result<ConsumeResult, String> {
-        let req = serde_json::json!({ "id": id, "broker": broker, "source": source, "traceIds": [TRACE], "waitMs": wait_ms });
+        let ids: &[&str] = if wait_ms == 0 { &[] } else { &[TRACE] };
+        let req = serde_json::json!({ "id": id, "broker": broker, "source": source, "traceIds": ids, "waitMs": wait_ms });
         tauri::async_runtime::block_on(state.clone().consume(serde_json::from_value(req).unwrap()))
     }
 

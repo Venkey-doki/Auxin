@@ -12,6 +12,8 @@ The **Map** screen (sidebar, under Running now) shows every service in the works
 
 Your edits win: a removed link or node stays removed however often it's found again, until you bring it back from the list on the Map screen.
 
+If `topology.json` can't be read (often a git merge conflict), the Map screen says so and edits aren't saved until it's fixed, so the file is never overwritten with a partial map. Old flow files keep their links until then, too.
+
 ## What discovery reads
 
 - **docker-compose** files at the root and in each service folder: services (matched to folders by `build` context or name), images (postgres → database, redis → cache, rabbitmq/kafka → queue, …), published ports, `depends_on` and `links` (**declared**), and URLs in `environment` (**inferred**).

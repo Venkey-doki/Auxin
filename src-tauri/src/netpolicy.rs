@@ -185,6 +185,28 @@ impl NetPolicy {
     /// The addresses of `host:port` this policy allows, for clients that dial
     /// sockets rather than URLs (message brokers). Blocking: it resolves DNS.
     /// Empty when the name doesn't resolve.
+    /// True when this environment limits where requests may go beyond the always-blocked addresses.
+    pub fn restricts(&self) -> bool {
+        !self.allow_private || !self.allow_hosts.is_empty()
+    }
+
+    /// Judges a URL's host name by resolving it here. The resolver hook covers direct connections,
+    /// but behind an `HTTP(S)_PROXY` reqwest only resolves the proxy, so without this a restricted
+    /// environment could reach any host by name. A name that doesn't resolve here (one only the
+    /// proxy knows) is held to `allow_hosts` by name alone. Blocking: call off the async threads.
+    pub fn check_name(&self, url: &Url) -> Result<(), Blocked> {
+        let Some(raw) = url.host_str() else { return Ok(()) };
+        let host = norm(raw.trim_start_matches('[').trim_end_matches(']'));
+        if !self.restricts() || host.parse::<IpAddr>().is_ok() || classify_name(&host).is_some() {
+            return Ok(());
+        }
+        let addrs: Vec<SocketAddr> = (host.as_str(), url.port_or_known_default().unwrap_or(0)).to_socket_addrs().map(Iterator::collect).unwrap_or_default();
+        if addrs.is_empty() {
+            return self.judge(Class::Public, &host, &host);
+        }
+        self.filter(&host, addrs).map(|_| ())
+    }
+
     pub fn check_host(&self, host: &str, port: u16) -> Result<Vec<SocketAddr>, Blocked> {
         let raw = host.trim_start_matches('[').trim_end_matches(']');
         if let Ok(ip) = raw.parse::<IpAddr>() {
@@ -292,6 +314,21 @@ mod tests {
         assert!(p.filter("db.internal", vec![SocketAddr::from(([10, 0, 0, 5], 0))]).is_ok());
         assert!(check(&p, "http://127.0.0.1/").is_ok());
         assert!(check(&p, "http://8.8.8.8/").is_err());
+    }
+
+    #[test]
+    fn names_are_judged_without_the_resolver_hook() {
+        // What a proxy would hide from the resolver hook: the destination's name.
+        let url = |u: &str| Url::parse(u).unwrap();
+        let p = NetPolicy { allow_private: true, allow_hosts: vec!["*.example.com".into()], env: "staging".into() };
+        // A name only the proxy can resolve is held to the allowed hosts by name.
+        assert_eq!(p.check_name(&url("https://prod.unresolvable.invalid/x")).unwrap_err().0, "Blocked by the network rules of “staging”: prod.unresolvable.invalid isn't in this environment's allowed hosts.");
+        assert!(p.check_name(&url("https://api.example.com/x")).is_ok());
+        // Private names stay with `allow_private`, which `check_url` already judges by name.
+        let private_off = NetPolicy { allow_private: false, allow_hosts: Vec::new(), env: String::new() };
+        assert!(private_off.check_url(&url("http://localhost:4000/")).is_err());
+        // An unrestricted environment doesn't resolve anything extra.
+        assert!(NetPolicy::default().check_name(&url("https://anything.invalid/")).is_ok());
     }
 
     #[test]

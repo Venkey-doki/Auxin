@@ -152,11 +152,23 @@ async function fakePublish(req: { destination: string; routingKey: string | null
   return { kind: "queue.publish", ms: 4, destination: req.destination, partition: null, offset: null };
 }
 
-async function fakeConsume(req: { id: string; source: string; waitMs: number }) {
+async function fakeConsume(req: { id: string; source: string; waitMs: number; traceIds: string[] }) {
   if (!subs.has(req.id)) subs.set(req.id, { source: req.source, buffer: [] });
   const sub = subs.get(req.id)!;
-  for (let waited = 0; !sub.buffer.length && waited < req.waitMs; waited += 50) await new Promise((r) => setTimeout(r, 50));
-  return { kind: "queue.consume", messages: sub.buffer.splice(0), skipped: 0 };
+  // As the backend does: each read filters by the ids it brings (a run opens before it knows them).
+  const mine = (m: MockMsg) => !req.traceIds.length || m.headers.some(([k, v]) => (k.toLowerCase() === "traceparent" && req.traceIds.some((id) => v.includes(id))) || (k.toLowerCase() === "x-request-id" && req.traceIds.includes(v)));
+  let skipped = 0;
+  const take = () => {
+    const all = sub.buffer.splice(0);
+    skipped += all.filter((m) => !mine(m)).length;
+    return all.filter(mine);
+  };
+  let messages = take();
+  for (let waited = 0; !messages.length && waited < req.waitMs; waited += 50) {
+    await new Promise((r) => setTimeout(r, 50));
+    messages = take();
+  }
+  return { kind: "queue.consume", messages, skipped };
 }
 
 /** Spans an instrumented stack would send: the called service, then each service it calls. */

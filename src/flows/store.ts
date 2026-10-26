@@ -9,7 +9,7 @@ import { activeWorkspace, navigate, selectServices, toast, updateActiveWorkspace
 import { allSteps, mapSteps, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow, slugify, type EnvDoc, type FlowDoc, type FlowStep } from "./model";
 import type { FlowRunState, StepOutcome } from "./runner";
 import type { VarSources } from "./vars";
-import { loadTopology } from "../map/store";
+import { flushMap, loadTopology } from "../map/store";
 
 interface FlowsState {
   root: string | null;
@@ -86,6 +86,7 @@ export async function syncWorkspace(root: string | null) {
       saveTimers.delete(path);
       saveNow(path);
     }
+    flushMap();
     parked.set(prev, { slice: pick(get()), lastWritten: new Map(lastWritten), lastValid: new Map(lastValid) });
   }
   const back = root ? parked.get(root) : undefined;
@@ -278,6 +279,21 @@ export async function saveEnv(env: EnvDoc) {
   await write(`env/${env.name}.json`, shared);
   // Only create a secret file once there is something secret to keep.
   if (Object.keys(env.secrets).length || lastWritten.has(`env/${env.name}.secret.json`)) await write(`env/${env.name}.secret.json`, secret);
+}
+
+/** Saves an environment into the workspace it belongs to, whether that's the open one or not. */
+export async function saveEnvIn(root: string, env: EnvDoc) {
+  if (get().root === root) return saveEnv(env);
+  const p = parked.get(root);
+  if (!p) return;
+  p.slice = { ...p.slice, envs: { ...p.slice.envs, [env.name]: env } };
+  const { shared, secret } = serializeEnv(env);
+  const files: [string, string][] = [[`env/${env.name}.json`, shared]];
+  if (Object.keys(env.secrets).length || p.lastWritten.has(`env/${env.name}.secret.json`)) files.push([`env/${env.name}.secret.json`, secret]);
+  for (const [path, text] of files) {
+    p.lastWritten.set(path, text);
+    await writeTo(root, path, text);
+  }
 }
 
 export async function createEnv(name: string) {

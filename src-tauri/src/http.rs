@@ -163,13 +163,18 @@ async fn execute(state: &HttpState, req: HttpRequest, temp_dir: PathBuf) -> Resu
     // Unparseable URLs fall through to reqwest's own error below.
     if let Ok(u) = reqwest::Url::parse(&req.url) {
         req.policy.check_url(&u).map_err(|b| b.to_string())?;
+        if req.policy.restricts() {
+            let p = req.policy.clone();
+            tauri::async_runtime::spawn_blocking(move || p.check_name(&u)).await.map_err(|e| e.to_string())?.map_err(|b| b.to_string())?;
+        }
     }
     // IP literals skip the resolver, so `check_url` covers them; hostnames are
     // checked on the addresses they resolve to, which are the only ones dialed.
     let policy = Arc::new(req.policy.clone());
     let redirect = if req.follow_redirects {
         let (p, limit) = (policy.clone(), Policy::limited(10));
-        Policy::custom(move |a| match p.check_url(a.url()) {
+        // Each hop is judged like the first request, by name too (see `check_name`).
+        Policy::custom(move |a| match p.check_url(a.url()).and_then(|()| p.check_name(a.url())) {
             Ok(()) => limit.redirect(a),
             Err(b) => a.error(b),
         })
@@ -408,6 +413,16 @@ mod tests {
         let state = Arc::new(HttpState::default());
         let err = rt().block_on(state.send(req("file:///etc/passwd".into(), "GET", HttpBody::None), std::env::temp_dir())).unwrap_err();
         assert_eq!(err, "Blocked by the network rules: file URLs aren't allowed, only http and https.");
+    }
+
+    #[test]
+    fn unlisted_host_is_refused_by_name_before_connecting() {
+        // Holds even when a proxy (which would hide the destination from the resolver) is in use.
+        let state = Arc::new(HttpState::default());
+        let mut r = req("https://prod.unresolvable.invalid/orders".into(), "GET", HttpBody::None);
+        r.policy = NetPolicy { allow_private: true, allow_hosts: vec!["*.staging.example.com".into()], env: "staging".into() };
+        let err = rt().block_on(state.send(r, std::env::temp_dir())).unwrap_err();
+        assert_eq!(err, "Blocked by the network rules of “staging”: prod.unresolvable.invalid isn't in this environment's allowed hosts.");
     }
 
     #[test]
