@@ -17,12 +17,10 @@ export interface ParsedRequest {
  */
 function tokenize(input: string, warnings: string[]): string[] {
   const out: string[] = [];
-  input
-    .split(/\\\r?\n/)
-    .forEach((line, n) => {
-      const open = tokenizeLine(line, out);
-      if (open) warnings.push(`Line ${n + 1} has an unclosed ${open === "'" ? "single" : "double"} quote; it was closed at the end of the line.`);
-    });
+  input.split(/\\\r?\n/).forEach((line, n) => {
+    const open = tokenizeLine(line, out);
+    if (open) warnings.push(`Line ${n + 1} has an unclosed ${open === "'" ? "single" : "double"} quote; it was closed at the end of the line.`);
+  });
   return out;
 }
 
@@ -98,7 +96,9 @@ export function parseCurl(input: string): ParsedRequest | null {
   if (json && !lower.includes("accept")) headers.push(["Accept", "application/json"]);
   if (!url) return null;
   if (!/^[a-z]+:\/\//i.test(url)) url = `http://${url}`;
-  for (const [k, v] of headers) if (/^authorization$/i.test(k) && /^(Bearer|Basic|Token)\s*$/i.test(v)) warnings.push(`The ${k} header has no token. Add it, or use a {{variable}} like Bearer {{token}}.`);
+  for (const [k, v] of headers)
+    if (/^authorization$/i.test(k) && /^(Bearer|Basic|Token)\s*$/i.test(v))
+      warnings.push(`The ${k} header has no token. Add it, or use a {{variable}} like Bearer {{token}}.`);
   return { method: method || (data.length ? "POST" : "GET"), url, headers, body: data.join("&"), warnings: warnings.length ? warnings : undefined };
 }
 

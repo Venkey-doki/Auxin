@@ -11,10 +11,10 @@ use lapin::tcp::TLSConfig;
 use lapin::types::{AMQPValue, FieldTable};
 use lapin::uri::{AMQPScheme, AMQPUri};
 use lapin::{AsyncTcpStream, BasicProperties, Channel, Confirmation, Connection, ConnectionProperties, ErrorKind, ExchangeKind};
-use rskafka::client::partition::{Compression, OffsetAt, UnknownTopicHandling};
-use rskafka::client::{error::Error as KafkaError, Client, ClientBuilder};
-use rskafka::record::{Record, RecordAndOffset};
 use rskafka::BackoffConfig;
+use rskafka::client::partition::{Compression, OffsetAt, UnknownTopicHandling};
+use rskafka::client::{Client, ClientBuilder, error::Error as KafkaError};
+use rskafka::record::{Record, RecordAndOffset};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
@@ -447,7 +447,8 @@ async fn rabbit_publish(req: &PublishRequest, url: &str) -> Result<(Option<i32>,
             props = props.with_content_type("application/json".into());
         }
         let key = req.routing_key.as_deref().unwrap_or("");
-        let confirm = ch.basic_publish(req.destination.as_str().into(), key.into(), BasicPublishOptions::default(), req.body.as_bytes(), props).await.map_err(fail)?;
+        let confirm =
+            ch.basic_publish(req.destination.as_str().into(), key.into(), BasicPublishOptions::default(), req.body.as_bytes(), props).await.map_err(fail)?;
         match confirm.await.map_err(fail)? {
             Confirmation::Nack(_) => Err(format!("RabbitMQ at {at} didn't accept the message.")),
             _ => Ok((None, None)),
@@ -461,7 +462,9 @@ async fn rabbit_publish(req: &PublishRequest, url: &str) -> Result<(Option<i32>,
 async fn rabbit_subscribe(req: &ConsumeRequest, url: &str, buf: Arc<Buffer>) -> Result<Closer, String> {
     let uri = rabbit_uri(url)?;
     if req.source.is_empty() {
-        return Err("RabbitMQ's default exchange delivers straight to a queue, so listening there would take messages from your workers. Pick a named exchange.".into());
+        return Err(
+            "RabbitMQ's default exchange delivers straight to a queue, so listening there would take messages from your workers. Pick a named exchange.".into(),
+        );
     }
     let at = rabbit_at(&uri);
     let conn = rabbit_connect(&uri, &req.policy).await?;

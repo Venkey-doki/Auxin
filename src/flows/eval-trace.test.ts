@@ -88,7 +88,10 @@ describe("flow file: extract, checks, poll, map", () => {
           method: "GET",
           url: "{{gw}}/jobs/{{jobId}}",
           extract: { result: "body.result" },
-          checks: [{ left: "status", op: "==", right: 200 }, { left: "body.ok", op: "exists" }],
+          checks: [
+            { left: "status", op: "==", right: 200 },
+            { left: "body.ok", op: "exists" },
+          ],
           poll: { until: { left: "body.status", op: "==", right: "done" }, everyMs: 500, maxTries: 10 },
         },
       ],
@@ -98,7 +101,10 @@ describe("flow file: extract, checks, poll, map", () => {
     expect(doc.steps.filter(isStep)[0].checks).toEqual([chk("status", "==", "200"), chk("body.ok", "exists")]);
     expect(doc.steps.filter(isStep)[0].poll).toEqual({ until: [chk("body.status", "==", '"done"')], everyMs: 500, maxTries: 10 });
     const out = JSON.parse(serializeFlow(doc).text);
-    expect(out.steps.filter(isStep)[0].checks).toEqual([{ left: "status", op: "==", right: 200 }, { left: "body.ok", op: "exists" }]);
+    expect(out.steps.filter(isStep)[0].checks).toEqual([
+      { left: "status", op: "==", right: 200 },
+      { left: "body.ok", op: "exists" },
+    ]);
     expect(out.steps[0].wait.until).toEqual([{ left: "body.status", op: "==", right: "done" }]);
     expect(out.steps.filter(isStep)[0].extract).toEqual({ result: "body.result" });
     // Links moved to the project map: read once for the handover, never written back.
@@ -155,7 +161,12 @@ describe("computeTrace", () => {
       ...base,
       services: [svc("/w/gateway"), svc("/w/router"), svc("/w/model"), svc("/w/billing", true, false), svc("/w/other", false)],
       linesByService: {
-        "/w/gateway": [L(900, "before window aux-1a2b3c4d"), L(1004, "POST /jobs req=aux-1a2b3c4d"), L(1050, "GET /health 200"), L(1100, "Process exited", "system")],
+        "/w/gateway": [
+          L(900, "before window aux-1a2b3c4d"),
+          L(1004, "POST /jobs req=aux-1a2b3c4d"),
+          L(1050, "GET /health 200"),
+          L(1100, "Process exited", "system"),
+        ],
         "/w/router": [L(1020, "forward req=aux-1a2b3c4d"), L(1060, "job 8f2c1e queued")],
         "/w/model": [L(1200, "job 8f2c1e start"), L(3100, "ERROR job 8f2c1e timeout")],
         "/w/other": [L(1500, "noise 8f2c1e"), L(1600, "unrelated")],
@@ -183,7 +194,11 @@ describe("computeTrace", () => {
   });
 
   it("puts the entry service first even if another service logged earlier", () => {
-    const t = computeTrace({ ...base, services: [svc("/w/gateway"), svc("/w/router")], linesByService: { "/w/gateway": [L(1300, "req=aux-1a2b3c4d")], "/w/router": [L(1010, "req=aux-1a2b3c4d")] } });
+    const t = computeTrace({
+      ...base,
+      services: [svc("/w/gateway"), svc("/w/router")],
+      linesByService: { "/w/gateway": [L(1300, "req=aux-1a2b3c4d")], "/w/router": [L(1010, "req=aux-1a2b3c4d")] },
+    });
     expect(t.hops.map((h) => h.alias)).toEqual(["gateway", "router"]);
     expect(t.traffic).toEqual([["gateway", "router"]]);
   });
@@ -202,7 +217,11 @@ describe("computeTrace", () => {
   });
 
   it("matches the traceparent trace-id too", () => {
-    const t = computeTrace({ ...base, services: [svc("/w/router")], linesByService: { "/w/router": [L(1500, "trace_id=0af7651916cd43dd8448eb211c80319c span ok")] } });
+    const t = computeTrace({
+      ...base,
+      services: [svc("/w/router")],
+      linesByService: { "/w/router": [L(1500, "trace_id=0af7651916cd43dd8448eb211c80319c span ok")] },
+    });
     expect(t.lines[0]).toMatchObject({ tier: 1, match: base.traceId });
   });
 });

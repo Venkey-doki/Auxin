@@ -37,10 +37,8 @@ pub struct DetectedService {
     pub otel_service_name: Option<String>,
 }
 
-const SKIP_DIRS: &[&str] = &[
-    "node_modules", "dist", "build", "target", "coverage", "__pycache__", "venv", ".venv", "env",
-    "vendor", "out", "tmp", "logs", "results", "data",
-];
+const SKIP_DIRS: &[&str] =
+    &["node_modules", "dist", "build", "target", "coverage", "__pycache__", "venv", ".venv", "env", "vendor", "out", "tmp", "logs", "results", "data"];
 
 /// Containers that commonly hold several services in a monorepo.
 const NESTED_PARENTS: &[&str] = &["apps", "services", "packages", "backend", "servers"];
@@ -64,11 +62,7 @@ pub fn scan(root: &Path) -> Vec<DetectedService> {
 
 fn scan_children(dir: &Path, found: &mut Vec<DetectedService>, depth_left: u8) {
     let Ok(entries) = fs::read_dir(dir) else { return };
-    let mut dirs: Vec<PathBuf> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_dir() && !is_skipped(p))
-        .collect();
+    let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_dir() && !is_skipped(p)).collect();
     dirs.sort();
     for d in dirs {
         if is_venv(&d) {
@@ -217,9 +211,18 @@ fn detect_node(dir: &Path, b: &mut Builder) {
     let all: Vec<String> = deps("dependencies").keys().chain(deps("devDependencies").keys()).cloned().collect();
     let has = |n: &str| all.iter().any(|d| d == n);
     b.framework = [
-        ("next", "Next.js"), ("@nestjs/core", "NestJS"), ("nuxt", "Nuxt"), ("@remix-run/node", "Remix"),
-        ("@sveltejs/kit", "SvelteKit"), ("astro", "Astro"), ("vite", "Vite"), ("fastify", "Fastify"),
-        ("express", "Express"), ("koa", "Koa"), ("hono", "Hono"), ("@angular/core", "Angular"),
+        ("next", "Next.js"),
+        ("@nestjs/core", "NestJS"),
+        ("nuxt", "Nuxt"),
+        ("@remix-run/node", "Remix"),
+        ("@sveltejs/kit", "SvelteKit"),
+        ("astro", "Astro"),
+        ("vite", "Vite"),
+        ("fastify", "Fastify"),
+        ("express", "Express"),
+        ("koa", "Koa"),
+        ("hono", "Hono"),
+        ("@angular/core", "Angular"),
     ]
     .iter()
     .find(|(dep, _)| has(dep))
@@ -253,8 +256,7 @@ fn detect_python(dir: &Path, b: &mut Builder) -> Option<u16> {
     }
     b.kind("python");
 
-    let reqs = read(&dir.join("requirements.txt")).unwrap_or_default().to_lowercase()
-        + &read(&dir.join("pyproject.toml")).unwrap_or_default().to_lowercase();
+    let reqs = read(&dir.join("requirements.txt")).unwrap_or_default().to_lowercase() + &read(&dir.join("pyproject.toml")).unwrap_or_default().to_lowercase();
     let framework = ["django", "fastapi", "flask", "streamlit"].into_iter().find(|f| reqs.contains(f));
     b.framework = framework.map(|f| match f {
         "django" => "Django".to_string(),
@@ -387,9 +389,10 @@ fn port_from_env_file(dir: &Path) -> Option<u16> {
         for line in text.lines() {
             let line = line.trim().trim_start_matches("export ");
             if let Some(v) = line.strip_prefix("PORT=")
-                && let Ok(port) = v.trim().trim_matches('"').trim_matches('\'').parse() {
-                    return Some(port);
-                }
+                && let Ok(port) = v.trim().trim_matches('"').trim_matches('\'').parse()
+            {
+                return Some(port);
+            }
         }
     }
     None
@@ -405,7 +408,14 @@ mod tests {
     fn scan_prints() {
         let root = std::env::var("AUXIN_SCAN_ROOT").expect("set AUXIN_SCAN_ROOT");
         for s in scan(Path::new(&root)) {
-            println!("{:<55} {:<8} {:<10} {:?} venv={:?}", s.name, s.kind, s.framework.unwrap_or_default(), s.default_command, s.venv.map(|v| file_name(Path::new(&v))));
+            println!(
+                "{:<55} {:<8} {:<10} {:?} venv={:?}",
+                s.name,
+                s.kind,
+                s.framework.unwrap_or_default(),
+                s.default_command,
+                s.venv.map(|v| file_name(Path::new(&v)))
+            );
         }
     }
 

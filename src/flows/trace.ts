@@ -104,7 +104,13 @@ function parseMaybe(text: string | null | undefined): unknown {
   }
 }
 
-export function correlationValues(input: { url: string; requestBody?: string; responseBody?: string | null; extracted?: string[]; ports?: number[] }): string[] {
+export function correlationValues(input: {
+  url: string;
+  requestBody?: string;
+  responseBody?: string | null;
+  extracted?: string[];
+  ports?: number[];
+}): string[] {
   const ports = new Set(input.ports ?? []);
   const out = new Set<string>();
   try {

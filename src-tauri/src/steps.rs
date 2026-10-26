@@ -137,8 +137,13 @@ mod tests {
     #[test]
     fn queue_steps_use_the_agreed_json() {
         let req: StepRequest = serde_json::from_str(r#"{"kind":"queue.publish","id":"p","broker":{"type":"kafka","url":"localhost:9092"},"destination":"orders","key":"k1","headers":[["traceparent","00-x-y-01"]],"body":"{}"}"#).unwrap();
-        assert!(matches!(req, StepRequest::QueuePublish(ref r) if r.timeout_ms == 10_000 && r.routing_key.is_none() && r.key.as_deref() == Some("k1") && r.policy.allow_private));
-        let req: StepRequest = serde_json::from_str(r#"{"kind":"queue.consume","id":"c","broker":{"type":"rabbitmq","url":"amqp://localhost"},"source":"orders","binding":null,"waitMs":0}"#).unwrap();
+        assert!(
+            matches!(req, StepRequest::QueuePublish(ref r) if r.timeout_ms == 10_000 && r.routing_key.is_none() && r.key.as_deref() == Some("k1") && r.policy.allow_private)
+        );
+        let req: StepRequest = serde_json::from_str(
+            r#"{"kind":"queue.consume","id":"c","broker":{"type":"rabbitmq","url":"amqp://localhost"},"source":"orders","binding":null,"waitMs":0}"#,
+        )
+        .unwrap();
         assert!(matches!(req, StepRequest::QueueConsume(ref r) if r.trace_ids.is_empty() && r.wait_ms == 0 && r.binding.is_none()));
         assert!(serde_json::from_str::<StepRequest>(r#"{"kind":"queue.consume","id":"c","broker":{"type":"sqs","url":"x"},"source":"o","waitMs":0}"#).is_err());
 

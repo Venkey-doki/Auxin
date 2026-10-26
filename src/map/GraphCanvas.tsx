@@ -216,7 +216,11 @@ export function GraphCanvas({
           }
           // Backward link: loop under the nodes, like n8n's return connections.
           const low = Math.max(a.y, b.y) + NODE_H + 40;
-          return { e, d: `M${sx} ${sy} C${sx + 70} ${sy}, ${sx + 70} ${low}, ${sx} ${low} L${tx} ${low} C${tx - 70} ${low}, ${tx - 70} ${ty}, ${tx} ${ty}`, mid: { x: (sx + tx) / 2, y: low } };
+          return {
+            e,
+            d: `M${sx} ${sy} C${sx + 70} ${sy}, ${sx + 70} ${low}, ${sx} ${low} L${tx} ${low} C${tx - 70} ${low}, ${tx - 70} ${ty}, ${tx} ${ty}`,
+            mid: { x: (sx + tx) / 2, y: low },
+          };
         })
         // Links that cross at their middle would stack their labels; nudge later ones down until clear.
         .map((p, i, all) => {
@@ -236,7 +240,11 @@ export function GraphCanvas({
       <div
         ref={box}
         className="relative h-full touch-none overflow-hidden bg-rail select-none"
-        style={{ backgroundImage: "radial-gradient(circle, #2c3136 1px, transparent 1.2px)", backgroundSize: `${20 * view.k}px ${20 * view.k}px`, backgroundPosition: `${view.x}px ${view.y}px` }}
+        style={{
+          backgroundImage: "radial-gradient(circle, #2c3136 1px, transparent 1.2px)",
+          backgroundSize: `${20 * view.k}px ${20 * view.k}px`,
+          backgroundPosition: `${view.x}px ${view.y}px`,
+        }}
         onPointerDown={(e) => onDown(e)}
         onPointerMove={onPointerMove}
         onPointerUp={onUp}
@@ -316,8 +324,20 @@ export function GraphCanvas({
                 style={{ left: p.x, top: p.y, width: NODE_W, height: NODE_H }}
                 title={n.title}
               >
-                <span aria-hidden className={cx("absolute top-1/2 -left-[5px] size-2.5 -translate-y-1/2 rounded-full border-2 bg-idle", paper ? "border-paper" : "border-surface-2")} />
-                <span aria-hidden className={cx("absolute top-1/2 -right-[5px] size-2.5 -translate-y-1/2 rounded-full border-2 bg-idle", paper ? "border-paper" : "border-surface-2")} />
+                <span
+                  aria-hidden
+                  className={cx(
+                    "absolute top-1/2 -left-[5px] size-2.5 -translate-y-1/2 rounded-full border-2 bg-idle",
+                    paper ? "border-paper" : "border-surface-2",
+                  )}
+                />
+                <span
+                  aria-hidden
+                  className={cx(
+                    "absolute top-1/2 -right-[5px] size-2.5 -translate-y-1/2 rounded-full border-2 bg-idle",
+                    paper ? "border-paper" : "border-surface-2",
+                  )}
+                />
                 <span
                   className={cx("grid size-9 flex-none place-items-center rounded-md", !paper && "bg-surface-3 text-fg-2")}
                   style={paper ? { background: `color-mix(in oklab, ${color} 28%, #efece4)`, color: `color-mix(in oklab, ${color} 55%, #1c1d1f)` } : undefined}
@@ -328,17 +348,33 @@ export function GraphCanvas({
                   <span className="truncate text-[13px] font-bold tracking-tight">{n.label}</span>
                   {n.sub && <span className={cx("truncate font-mono text-xs", paper ? "text-ink-2" : "text-fg-3")}>{n.sub}</span>}
                 </span>
-                {n.tag && <span className={cx("absolute -bottom-2.5 left-3 rounded px-1.5 text-2xs", n.tag.bad ? "bg-bad-ink text-white" : "bg-surface-3 text-fg-2")}>{n.tag.text}</span>}
+                {n.tag && (
+                  <span className={cx("absolute -bottom-2.5 left-3 rounded px-1.5 text-2xs", n.tag.bad ? "bg-bad-ink text-white" : "bg-surface-3 text-fg-2")}>
+                    {n.tag.text}
+                  </span>
+                )}
                 {run && (
                   <span
-                    className={cx("absolute -top-2 -right-2 grid size-5 place-items-center rounded-full text-white shadow", run.state === "ok" ? "bg-ok-ink" : run.state === "bad" ? "bg-bad-ink" : "bg-warm-ink")}
+                    className={cx(
+                      "absolute -top-2 -right-2 grid size-5 place-items-center rounded-full text-white shadow",
+                      run.state === "ok" ? "bg-ok-ink" : run.state === "bad" ? "bg-bad-ink" : "bg-warm-ink",
+                    )}
                     aria-label={run.state === "ok" ? "Passed" : run.state === "bad" ? "Failed" : "In progress"}
                   >
-                    {run.state === "ok" ? <Check className="size-3" strokeWidth={3} /> : run.state === "bad" ? <AlertTriangle className="size-3" strokeWidth={2.5} /> : <span className="size-2.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />}
+                    {run.state === "ok" ? (
+                      <Check className="size-3" strokeWidth={3} />
+                    ) : run.state === "bad" ? (
+                      <AlertTriangle className="size-3" strokeWidth={2.5} />
+                    ) : (
+                      <span className="size-2.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    )}
                   </span>
                 )}
                 {run?.ms != null && (
-                  <span className={cx("absolute -top-5 left-2 font-mono text-xs", run.state === "bad" ? "text-bad-soft" : "text-fg-2")} title={run.approx ? "From log timestamps (approximate)" : "Measured response time"}>
+                  <span
+                    className={cx("absolute -top-5 left-2 font-mono text-xs", run.state === "bad" ? "text-bad-soft" : "text-fg-2")}
+                    title={run.approx ? "From log timestamps (approximate)" : "Measured response time"}
+                  >
                     {run.approx ? "≈" : ""}
                     {run.ms >= 1000 ? `${(run.ms / 1000).toFixed(2)}s` : `${run.ms}ms`}
                   </span>
@@ -350,9 +386,14 @@ export function GraphCanvas({
 
         {!nodes.length && empty && <div className="pointer-events-none absolute inset-0 grid place-items-center">{empty}</div>}
 
-        {focus && focusLabel && <div className="pointer-events-none absolute top-3 left-3 rounded-md bg-surface/90 px-2.5 py-1 text-xs text-fg-2">{focusLabel}</div>}
+        {focus && focusLabel && (
+          <div className="pointer-events-none absolute top-3 left-3 rounded-md bg-surface/90 px-2.5 py-1 text-xs text-fg-2">{focusLabel}</div>
+        )}
 
-        <div className="absolute bottom-3 left-3 flex items-center gap-0.5 rounded-md border border-line-strong bg-surface p-0.5" onPointerDown={(e) => e.stopPropagation()}>
+        <div
+          className="absolute bottom-3 left-3 flex items-center gap-0.5 rounded-md border border-line-strong bg-surface p-0.5"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
           <IconButton size="sm" label="Zoom out" onClick={() => zoomBy(1 / 1.2)}>
             <Minus />
           </IconButton>

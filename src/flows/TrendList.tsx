@@ -70,7 +70,14 @@ function Sparkline({ points, label }: { points: TrendPoint[]; label: string }) {
 
   return (
     <span className="relative block" onPointerLeave={() => setHover(null)}>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="block overflow-visible" role="img" aria-label={`${label}: response time over the last ${points.length} runs`}>
+      <svg
+        width={W}
+        height={H}
+        viewBox={`0 0 ${W} ${H}`}
+        className="block overflow-visible"
+        role="img"
+        aria-label={`${label}: response time over the last ${points.length} runs`}
+      >
         <line x1={PAD} x2={W - PAD} y1={H - PAD} y2={H - PAD} stroke="var(--color-line)" strokeWidth={1} />
         {segments.map((s, i) => (
           <path key={i} d={s} fill="none" stroke="var(--color-fg-3)" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
@@ -91,13 +98,24 @@ function Sparkline({ points, label }: { points: TrendPoint[]; label: string }) {
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={0} y2={H} stroke="var(--color-fg-3)" strokeWidth={1} opacity={0.5} />}
         {/* Hit targets wider than the marks: one column per run. */}
         {points.map((p, i) => (
-          <rect key={`hit-${p.runId}`} x={x(i) - W / Math.max(2, points.length) / 2} y={0} width={W / Math.max(2, points.length)} height={H} fill="transparent" onPointerEnter={() => setHover(i)} />
+          <rect
+            key={`hit-${p.runId}`}
+            x={x(i) - W / Math.max(2, points.length) / 2}
+            y={0}
+            width={W / Math.max(2, points.length)}
+            height={H}
+            fill="transparent"
+            onPointerEnter={() => setHover(i)}
+          />
         ))}
       </svg>
       {shown && (
         <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 rounded-md border border-line-strong bg-pop px-2 py-1 text-xs whitespace-nowrap text-fg shadow-[0_12px_32px_rgb(0_0_0/0.5)]">
           <span className="font-mono font-semibold">{shown.ms != null ? formatMs(shown.ms) : "no response"}</span>
-          <span className="text-fg-3"> · {new Date(shown.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+          <span className="text-fg-3">
+            {" "}
+            · {new Date(shown.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+          </span>
           {shown.failed && <span className="text-bad-soft"> · failed</span>}
           {shown.ms == null && !shown.failed && <span className="text-fg-3"> · not sent</span>}
         </span>

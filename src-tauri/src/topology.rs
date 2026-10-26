@@ -70,22 +70,41 @@ const MAX_K8S_DEPTH: usize = 4;
 
 /// Image name prefix (last path segment, no tag) → (kind, tech).
 const IMAGES: &[(&str, &str, &str)] = &[
-    ("postgres", "database", "postgres"), ("postgis", "database", "postgres"), ("timescale", "database", "postgres"),
-    ("mysql", "database", "mysql"), ("mariadb", "database", "mysql"), ("mongo", "database", "mongodb"),
-    ("redis", "cache", "redis"), ("valkey", "cache", "redis"), ("keydb", "cache", "redis"), ("memcached", "cache", "memcached"),
-    ("rabbitmq", "queue", "rabbitmq"), ("kafka", "queue", "kafka"), ("cp-kafka", "queue", "kafka"), ("redpanda", "queue", "kafka"),
-    ("nats", "queue", "nats"), ("elasticsearch", "database", "elasticsearch"), ("opensearch", "database", "elasticsearch"),
-    ("localstack", "external", "aws"), ("minio", "external", "s3"),
+    ("postgres", "database", "postgres"),
+    ("postgis", "database", "postgres"),
+    ("timescale", "database", "postgres"),
+    ("mysql", "database", "mysql"),
+    ("mariadb", "database", "mysql"),
+    ("mongo", "database", "mongodb"),
+    ("redis", "cache", "redis"),
+    ("valkey", "cache", "redis"),
+    ("keydb", "cache", "redis"),
+    ("memcached", "cache", "memcached"),
+    ("rabbitmq", "queue", "rabbitmq"),
+    ("kafka", "queue", "kafka"),
+    ("cp-kafka", "queue", "kafka"),
+    ("redpanda", "queue", "kafka"),
+    ("nats", "queue", "nats"),
+    ("elasticsearch", "database", "elasticsearch"),
+    ("opensearch", "database", "elasticsearch"),
+    ("localstack", "external", "aws"),
+    ("minio", "external", "s3"),
 ];
 
 /// URL scheme → (kind, tech, default port).
 const SCHEMES: &[(&str, &str, &str, Option<u16>)] = &[
-    ("postgres", "database", "postgres", Some(5432)), ("postgresql", "database", "postgres", Some(5432)),
-    ("mysql", "database", "mysql", Some(3306)), ("mariadb", "database", "mysql", Some(3306)),
-    ("mongodb", "database", "mongodb", Some(27017)), ("mongodb+srv", "database", "mongodb", None),
-    ("redis", "cache", "redis", Some(6379)), ("rediss", "cache", "redis", Some(6379)),
-    ("amqp", "queue", "rabbitmq", Some(5672)), ("amqps", "queue", "rabbitmq", Some(5671)),
-    ("nats", "queue", "nats", Some(4222)), ("kafka", "queue", "kafka", Some(9092)),
+    ("postgres", "database", "postgres", Some(5432)),
+    ("postgresql", "database", "postgres", Some(5432)),
+    ("mysql", "database", "mysql", Some(3306)),
+    ("mariadb", "database", "mysql", Some(3306)),
+    ("mongodb", "database", "mongodb", Some(27017)),
+    ("mongodb+srv", "database", "mongodb", None),
+    ("redis", "cache", "redis", Some(6379)),
+    ("rediss", "cache", "redis", Some(6379)),
+    ("amqp", "queue", "rabbitmq", Some(5672)),
+    ("amqps", "queue", "rabbitmq", Some(5671)),
+    ("nats", "queue", "nats", Some(4222)),
+    ("kafka", "queue", "kafka", Some(9092)),
 ];
 const KAFKA: (&str, &str, &str, Option<u16>) = ("kafka", "queue", "kafka", Some(9092));
 
@@ -410,11 +429,7 @@ fn line_of(text: &str, from: usize, needle: &str) -> Option<usize> {
 /// The least-indented `name:` line (the service definition, not a `depends_on` map key).
 fn header_line(text: &str, name: &str) -> usize {
     let headers = [format!("{name}:"), format!("\"{name}\":"), format!("'{name}':")];
-    text.lines()
-        .enumerate()
-        .filter(|(_, l)| headers.iter().any(|h| l.trim() == h))
-        .min_by_key(|(_, l)| l.len() - l.trim_start().len())
-        .map_or(0, |(i, _)| i)
+    text.lines().enumerate().filter(|(_, l)| headers.iter().any(|h| l.trim() == h)).min_by_key(|(_, l)| l.len() - l.trim_start().len()).map_or(0, |(i, _)| i)
 }
 
 fn is_yaml(lower_name: &str) -> bool {
@@ -473,7 +488,13 @@ fn compose_env(v: Option<&Value>) -> Vec<(&str, &str)> {
 
 /// `spec.template.spec.containers` of a workload (empty for a Service).
 fn containers(v: &Value) -> impl Iterator<Item = &Value> {
-    v.get("spec").and_then(|s| s.get("template")).and_then(|t| t.get("spec")).and_then(|s| s.get("containers")).and_then(Value::as_sequence).into_iter().flatten()
+    v.get("spec")
+        .and_then(|s| s.get("template"))
+        .and_then(|t| t.get("spec"))
+        .and_then(|s| s.get("containers"))
+        .and_then(Value::as_sequence)
+        .into_iter()
+        .flatten()
 }
 
 /// `cache`, `cache.ns`, `cache.ns.svc(.cluster.local)` → `cache`.

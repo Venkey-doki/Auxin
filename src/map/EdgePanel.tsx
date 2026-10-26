@@ -47,14 +47,30 @@ export function toGraphEdge(e: MapEdge, id: (key: string) => string): GraphEdge 
   };
 }
 
-export function EdgePanel({ edge, fromLabel, toLabel, onKeep, onRemove, onClose }: { edge: MapEdge; fromLabel: string; toLabel: string; onKeep: () => void; onRemove: () => void; onClose: () => void }) {
+export function EdgePanel({
+  edge,
+  fromLabel,
+  toLabel,
+  onKeep,
+  onRemove,
+  onClose,
+}: {
+  edge: MapEdge;
+  fromLabel: string;
+  toLabel: string;
+  onKeep: () => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
   return (
     <>
       <div className="flex items-center gap-2">
         <span className="font-semibold">{fromLabel}</span>
         <ArrowRight className="size-3.5 text-fg-3" />
         <span className="font-semibold">{toLabel}</span>
-        <span className={cx("rounded px-1.5 text-xs text-fg-2", edge.confidence === "inferred" ? "border border-dashed border-line-strong" : "bg-surface-3")}>{CONFIDENCE_LABEL[edge.confidence]}</span>
+        <span className={cx("rounded px-1.5 text-xs text-fg-2", edge.confidence === "inferred" ? "border border-dashed border-line-strong" : "bg-surface-3")}>
+          {CONFIDENCE_LABEL[edge.confidence]}
+        </span>
         <span className="flex-1" />
         <IconButton size="sm" label="Close" onClick={onClose}>
           <X />
@@ -65,9 +81,16 @@ export function EdgePanel({ edge, fromLabel, toLabel, onKeep, onRemove, onClose 
           <li key={i} className="grid gap-0.5">
             <span className="text-xs text-fg-2">
               {SOURCE_LABEL[ev.source]}
-              {ev.lastSeen && <span className="text-fg-3"> · last seen {new Date(ev.lastSeen).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
+              {ev.lastSeen && (
+                <span className="text-fg-3">
+                  {" "}
+                  · last seen {new Date(ev.lastSeen).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
             </span>
-            {ev.source !== "manual" && <span className="rounded bg-rail px-2 py-1 font-mono text-xs break-all whitespace-pre-wrap text-fg-3 select-text">{ev.detail}</span>}
+            {ev.source !== "manual" && (
+              <span className="rounded bg-rail px-2 py-1 font-mono text-xs break-all whitespace-pre-wrap text-fg-3 select-text">{ev.detail}</span>
+            )}
           </li>
         ))}
       </ul>

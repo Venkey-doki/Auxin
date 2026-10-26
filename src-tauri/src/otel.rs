@@ -2,14 +2,14 @@
 //! spans here (Auxin launches them with `OTEL_EXPORTER_OTLP_ENDPOINT`), and flow runs
 //! read them back by trace id. gRPC (4317) is not served.
 
-use crate::topology::{redact, MASK};
+use crate::topology::{MASK, redact};
 use flate2::read::GzDecoder;
 use http_body_util::{BodyExt as _, Full, LengthLimitError, Limited};
 use hyper::body::{Body as _, Bytes, Incoming};
-use hyper::{header, server::conn::http1, service::service_fn, Method, Request, Response, StatusCode};
+use hyper::{Method, Request, Response, StatusCode, header, server::conn::http1, service::service_fn};
 use hyper_util::rt::TokioIo;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
-use opentelemetry_proto::tonic::common::v1::{any_value::Value, AnyValue};
+use opentelemetry_proto::tonic::common::v1::{AnyValue, any_value::Value};
 use prost::Message as _;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -85,13 +85,18 @@ impl OtelState {
         let mut g = self.0.lock().unwrap();
         let Store { status, traces, order } = &mut *g;
         for span in spans {
-            traces.entry(span.trace_id.clone()).or_insert_with(|| {
-                order.push_back(span.trace_id.clone());
-                Vec::new()
-            }).push(span);
+            traces
+                .entry(span.trace_id.clone())
+                .or_insert_with(|| {
+                    order.push_back(span.trace_id.clone());
+                    Vec::new()
+                })
+                .push(span);
             status.spans += 1;
         }
-        while status.spans > MAX_SPANS && let Some(oldest) = order.pop_front() {
+        while status.spans > MAX_SPANS
+            && let Some(oldest) = order.pop_front()
+        {
             status.spans -= traces.remove(&oldest).map_or(0, |t| t.len());
         }
     }
@@ -250,7 +255,9 @@ fn text(v: Option<&AnyValue>) -> String {
         Some(Value::DoubleValue(d)) => d.to_string(),
         Some(Value::BytesValue(b)) => hex(b),
         Some(Value::ArrayValue(a)) => format!("[{}]", a.values.iter().map(|v| text(Some(v))).collect::<Vec<_>>().join(", ")),
-        Some(Value::KvlistValue(l)) => format!("{{{}}}", l.values.iter().map(|kv| format!("{}: {}", kv.key, text(kv.value.as_ref()))).collect::<Vec<_>>().join(", ")),
+        Some(Value::KvlistValue(l)) => {
+            format!("{{{}}}", l.values.iter().map(|kv| format!("{}: {}", kv.key, text(kv.value.as_ref()))).collect::<Vec<_>>().join(", "))
+        }
         _ => String::new(),
     }
 }
@@ -262,10 +269,10 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::{write::GzEncoder, Compression};
+    use flate2::{Compression, write::GzEncoder};
     use opentelemetry_proto::tonic::common::v1::KeyValue;
     use opentelemetry_proto::tonic::resource::v1::Resource;
-    use opentelemetry_proto::tonic::trace::v1::{span, ResourceSpans, ScopeSpans, Span as PSpan, Status as PStatus};
+    use opentelemetry_proto::tonic::trace::v1::{ResourceSpans, ScopeSpans, Span as PSpan, Status as PStatus, span};
     use std::io::{Read, Write};
 
     const T1: &str = "5b8efff798038103d269b633813fc60c";
@@ -320,25 +327,40 @@ mod tests {
     fn resource(service: Option<&str>, spans: Vec<PSpan>) -> ResourceSpans {
         let mut attributes = vec![kv("telemetry.sdk.language", "nodejs")];
         attributes.extend(service.map(|s| kv("service.name", s)));
-        ResourceSpans { resource: Some(Resource { attributes, ..Default::default() }), scope_spans: vec![ScopeSpans { spans, ..Default::default() }], ..Default::default() }
+        ResourceSpans {
+            resource: Some(Resource { attributes, ..Default::default() }),
+            scope_spans: vec![ScopeSpans { spans, ..Default::default() }],
+            ..Default::default()
+        }
     }
 
     /// web: server -> client + producer (T1); worker: consumer linked to the producer (T2); an unrelated trace (T3).
     fn sample() -> ExportTraceServiceRequest {
         use span::SpanKind::*;
         let server = pspan(T1, "1111111111111111", "", "POST /orders", Server, 0, 20_000, vec![kv("http.request.method", "POST")]);
-        let client = pspan(T1, "2222222222222222", "1111111111111111", "SELECT orders", Client, 1_500, 5_250, vec![
-            kv("db.connection_string", "postgres://app:devpass@db:5432/app"),
-            kv("http.request.header.Authorization", "Bearer abc"),
-            kv("db.user", "app"),
-        ]);
+        let client = pspan(
+            T1,
+            "2222222222222222",
+            "1111111111111111",
+            "SELECT orders",
+            Client,
+            1_500,
+            5_250,
+            vec![kv("db.connection_string", "postgres://app:devpass@db:5432/app"), kv("http.request.header.Authorization", "Bearer abc"), kv("db.user", "app")],
+        );
         let producer = pspan(T1, "3333333333333333", "1111111111111111", "orders publish", Producer, 8_000, 1_000, vec![]);
         let mut consumer = pspan(T2, "4444444444444444", "", "orders process", Consumer, 9_500, 3_000, vec![]);
         consumer.links = vec![span::Link { trace_id: unhex(T1), span_id: unhex("3333333333333333"), ..Default::default() }];
         consumer.status = Some(PStatus { code: 2, message: "stock check failed".into() });
         let child = pspan(T2, "5555555555555555", "4444444444444444", "reserve", Internal, 10_000, 500, vec![]);
         let other = pspan(T3, "6666666666666666", "", "cron", Internal, 0, 1, vec![]);
-        ExportTraceServiceRequest { resource_spans: vec![resource(Some("web"), vec![server, client, producer]), resource(Some("worker"), vec![consumer, child]), resource(None, vec![other])] }
+        ExportTraceServiceRequest {
+            resource_spans: vec![
+                resource(Some("web"), vec![server, client, producer]),
+                resource(Some("worker"), vec![consumer, child]),
+                resource(None, vec![other]),
+            ],
+        }
     }
 
     fn names(spans: &[Span]) -> Vec<&str> {
@@ -358,14 +380,20 @@ mod tests {
         assert_eq!((client.trace_id.as_str(), client.span_id.as_str(), client.parent_span_id.as_deref()), (T1, "2222222222222222", Some("1111111111111111")));
         assert_eq!((client.kind, client.service.as_str(), client.status, client.status_message.as_deref()), ("client", "web", "unset", None));
         assert_eq!((client.start_ms, client.duration_ms), (1_700_000_000_001.5, 5.25));
-        assert_eq!(client.attributes, [
-            ("db.connection_string".to_string(), "postgres://••••@db:5432/app".to_string()),
-            ("http.request.header.Authorization".to_string(), MASK.to_string()),
-            ("db.user".to_string(), "app".to_string()),
-        ]);
+        assert_eq!(
+            client.attributes,
+            [
+                ("db.connection_string".to_string(), "postgres://••••@db:5432/app".to_string()),
+                ("http.request.header.Authorization".to_string(), MASK.to_string()),
+                ("db.user".to_string(), "app".to_string()),
+            ]
+        );
         assert_eq!((spans[0].kind, spans[0].parent_span_id.as_deref(), spans[2].kind), ("server", None, "producer"));
         let consumer = &spans[3];
-        assert_eq!((consumer.kind, consumer.service.as_str(), consumer.status, consumer.status_message.as_deref()), ("consumer", "worker", "error", Some("stock check failed")));
+        assert_eq!(
+            (consumer.kind, consumer.service.as_str(), consumer.status, consumer.status_message.as_deref()),
+            ("consumer", "worker", "error", Some("stock check failed"))
+        );
         assert_eq!((consumer.links[0].trace_id.as_str(), consumer.links[0].span_id.as_str()), (T1, "3333333333333333"));
 
         // The other direction: the consumer's trace pulls in the producer's.
@@ -400,18 +428,27 @@ mod tests {
         let spans = state.spans_for(&[T1.into()]);
         assert_eq!(names(&spans), ["GET /api/users", "db"]);
         let s = &spans[0];
-        assert_eq!((s.trace_id.as_str(), s.span_id.as_str(), s.parent_span_id.as_deref(), s.kind, s.status, s.service.as_str()), (T1, "eee19b7ec3c1b174", None, "server", "ok", "web"));
+        assert_eq!(
+            (s.trace_id.as_str(), s.span_id.as_str(), s.parent_span_id.as_deref(), s.kind, s.status, s.service.as_str()),
+            (T1, "eee19b7ec3c1b174", None, "server", "ok", "web")
+        );
         assert_eq!((s.start_ms, s.duration_ms), (1_729_958_400_123.456_8, 50.0));
         let attrs: Vec<(&str, &str)> = s.attributes.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        assert_eq!(attrs, [
-            ("http.response.status_code", "200"),
-            ("http.request.body.size", "512"),
-            ("url.full", "http://localhost:3000/api/users?token=••••••&page=2"),
-            ("http.request.header.cookie", MASK),
-            ("retry", "false"),
-            ("ratio", "0.5"),
-        ]);
-        assert_eq!((spans[1].kind, spans[1].parent_span_id.as_deref(), spans[1].status, spans[1].duration_ms), ("client", Some("eee19b7ec3c1b174"), "unset", 10.0));
+        assert_eq!(
+            attrs,
+            [
+                ("http.response.status_code", "200"),
+                ("http.request.body.size", "512"),
+                ("url.full", "http://localhost:3000/api/users?token=••••••&page=2"),
+                ("http.request.header.cookie", MASK),
+                ("retry", "false"),
+                ("ratio", "0.5"),
+            ]
+        );
+        assert_eq!(
+            (spans[1].kind, spans[1].parent_span_id.as_deref(), spans[1].status, spans[1].duration_ms),
+            ("client", Some("eee19b7ec3c1b174"), "unset", 10.0)
+        );
 
         let mut gz = GzEncoder::new(Vec::new(), Compression::default());
         gz.write_all(&sample().encode_to_vec()).unwrap();
@@ -520,7 +557,12 @@ mod tests {
 
         let trace = "4bf92f3577b34da6a3ce929d0e0e4736";
         tauri::async_runtime::block_on(async {
-            reqwest::Client::new().get(format!("http://127.0.0.1:{api_port}/orders")).header("traceparent", format!("00-{trace}-00f067aa0ba902b7-01")).send().await.unwrap();
+            reqwest::Client::new()
+                .get(format!("http://127.0.0.1:{api_port}/orders"))
+                .header("traceparent", format!("00-{trace}-00f067aa0ba902b7-01"))
+                .send()
+                .await
+                .unwrap();
         });
         let mut spans = Vec::new();
         for _ in 0..50 {

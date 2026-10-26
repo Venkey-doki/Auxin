@@ -3,7 +3,23 @@
  * Linear-style rows that open into an Insomnia-style request | response split
  * with the request's trace. docs/flows-spec.md §7.
  */
-import { ChevronDown, ChevronRight, ClipboardPaste, GripVertical, History, Inbox, Play, Plus, Rows3, Send, Settings2, Split, Square, Trash2, TriangleAlert } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ClipboardPaste,
+  GripVertical,
+  History,
+  Inbox,
+  Play,
+  Plus,
+  Rows3,
+  Send,
+  Settings2,
+  Split,
+  Square,
+  Trash2,
+  TriangleAlert,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { EditableTitle } from "../components/GroupView";
 import { StatusMark, STATUS_TEXT, type Shown } from "../components/status";
@@ -15,7 +31,23 @@ import { useStore } from "../state/store";
 import { EnvPanel } from "./EnvPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import type { Issue } from "./engine";
-import { addToLane, allSteps, blankBlock, blankQueueStep, blankStep, DEFAULT_NETWORK, isStep, moveItem, outsideWorkspace, removeItem, type BodyKind, type FlowBlock, type FlowDoc, type FlowStep, type Lane } from "./model";
+import {
+  addToLane,
+  allSteps,
+  blankBlock,
+  blankQueueStep,
+  blankStep,
+  DEFAULT_NETWORK,
+  isStep,
+  moveItem,
+  outsideWorkspace,
+  removeItem,
+  type BodyKind,
+  type FlowBlock,
+  type FlowDoc,
+  type FlowStep,
+  type Lane,
+} from "./model";
 import { formatBytes, formatMs, MethodBadge } from "./parts";
 import { cancelRun, flowIssues, isRunning, runFlow, sendStep } from "./runner";
 import { ServiceMap } from "./ServiceMap";
@@ -391,15 +423,27 @@ function StepRow({
   const mark = out && !(notTaken && out.state === "skipped") ? STATE_MARK[out.state] : undefined;
   const issue = issues.find((i) => i.level === "error") ?? issues[0];
   return (
-    <div className={cx("border-b border-line last:border-b-0", dragId === step.id && "opacity-50")} onDragEnter={() => dragTo(step.id)} onDragOver={(e) => e.preventDefault()}>
-      <div className={cx("group flex h-11 items-center gap-3 pr-3 pl-1 transition-colors", open ? "bg-surface-2" : "bg-surface hover:bg-surface-2", notTaken && !open && "opacity-60")}>
+    <div
+      className={cx("border-b border-line last:border-b-0", dragId === step.id && "opacity-50")}
+      onDragEnter={() => dragTo(step.id)}
+      onDragOver={(e) => e.preventDefault()}
+    >
+      <div
+        className={cx(
+          "group flex h-11 items-center gap-3 pr-3 pl-1 transition-colors",
+          open ? "bg-surface-2" : "bg-surface hover:bg-surface-2",
+          notTaken && !open && "opacity-60",
+        )}
+      >
         <Grip id={step.id} locked={locked} onDragStart={onDragStart} onDragEnd={onDragEnd} />
         <button onClick={onToggle} aria-expanded={open} className="flex h-full min-w-0 flex-1 items-center gap-3 text-left">
           <ChevronRight className={cx("size-3.5 flex-none text-fg-3 transition-transform", open && "rotate-90")} />
           <span className="w-5 flex-none font-mono text-xs text-fg-3 tabular-nums">{n}</span>
           <MethodBadge method={step.queue ? (step.type === "queue.publish" ? "PUB" : "SUB") : step.method} />
           <span className="flex-none text-base font-medium">{step.name}</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-3">{step.queue ? [step.queue.broker, step.queue.destination || "default exchange", step.queue.routingKey].filter(Boolean).join(" · ") : step.url}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-3">
+            {step.queue ? [step.queue.broker, step.queue.destination || "default exchange", step.queue.routingKey].filter(Boolean).join(" · ") : step.url}
+          </span>
           {issue && (
             <span title={issue.message} className="flex-none">
               <TriangleAlert className={cx("size-3.5", issue.level === "error" ? "text-bad-soft" : "text-warm")} aria-label={issue.message} />
@@ -412,7 +456,10 @@ function StepRow({
           )}
           {step.poll && <span className="flex-none rounded bg-surface-3 px-1.5 text-xs text-fg-2">poll</span>}
           {step.retry && !step.queue && (
-            <span className="flex-none rounded bg-surface-3 px-1.5 text-xs text-fg-2" title={`Re-sent up to ${step.retry.max} more times ${step.retry.on === "any" ? "if it fails" : "on errors and 5xx"}`}>
+            <span
+              className="flex-none rounded bg-surface-3 px-1.5 text-xs text-fg-2"
+              title={`Re-sent up to ${step.retry.max} more times ${step.retry.on === "any" ? "if it fails" : "on errors and 5xx"}`}
+            >
               retry ×{step.retry.max}
             </span>
           )}
@@ -508,7 +555,8 @@ function BlockView({
             onDragOver={(e) => e.preventDefault()}
             disabled={drag.locked}
           >
-            <Plus className="size-3.5" /> {steps.length ? "Add request" : key === "steps" ? "Add a request to send at the same time" : "Add a request, or drag one here"}
+            <Plus className="size-3.5" />{" "}
+            {steps.length ? "Add request" : key === "steps" ? "Add a request to send at the same time" : "Add a request, or drag one here"}
           </button>
         </div>
       </div>
@@ -530,7 +578,11 @@ function BlockView({
           disabled={!isIf}
           aria-expanded={isIf ? editing : undefined}
         >
-          {isIf ? <ChevronRight className={cx("size-3.5 flex-none text-fg-3 transition-transform", editing && "rotate-90")} /> : <span className="w-3.5 flex-none" />}
+          {isIf ? (
+            <ChevronRight className={cx("size-3.5 flex-none text-fg-3 transition-transform", editing && "rotate-90")} />
+          ) : (
+            <span className="w-3.5 flex-none" />
+          )}
           {isIf ? <Split className="size-4 flex-none rotate-90 text-fg-2" aria-hidden /> : <Rows3 className="size-4 flex-none text-fg-2" aria-hidden />}
           <span className="flex-none text-xs font-semibold tracking-wider text-fg uppercase">{isIf ? "If" : "Parallel"}</span>
           {isIf ? (
@@ -541,7 +593,9 @@ function BlockView({
             )
           ) : (
             <span className="min-w-0 truncate text-sm text-fg-3">
-              {block.steps.length ? `${block.steps.length} request${block.steps.length === 1 ? "" : "s"} sent at the same time` : "requests here are sent at the same time"}
+              {block.steps.length
+                ? `${block.steps.length} request${block.steps.length === 1 ? "" : "s"} sent at the same time`
+                : "requests here are sent at the same time"}
             </span>
           )}
           {isIf && <span className="flex-none text-xs text-fg-3">on the previous response</span>}

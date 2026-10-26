@@ -24,13 +24,26 @@ const QUEUE_COLOR: Record<string, string> = { PUB: "#76c8bd", SUB: "#d7b46e" };
 export function MethodBadge({ method }: { method: string }) {
   const c = METHOD_COLOR[method] ?? QUEUE_COLOR[method] ?? "#a9b8d6";
   return (
-    <span className="inline-grid h-5 w-14 flex-none place-items-center rounded font-mono text-[11px] font-semibold" style={{ color: c, background: `color-mix(in oklab, ${c} 16%, transparent)` }}>
+    <span
+      className="inline-grid h-5 w-14 flex-none place-items-center rounded font-mono text-[11px] font-semibold"
+      style={{ color: c, background: `color-mix(in oklab, ${c} 16%, transparent)` }}
+    >
       {method}
     </span>
   );
 }
 
-export function Tabs<T extends string>({ tabs, value, onChange, right }: { tabs: { id: T; label: ReactNode; count?: number; dot?: boolean }[]; value: T; onChange: (t: T) => void; right?: ReactNode }) {
+export function Tabs<T extends string>({
+  tabs,
+  value,
+  onChange,
+  right,
+}: {
+  tabs: { id: T; label: ReactNode; count?: number; dot?: boolean }[];
+  value: T;
+  onChange: (t: T) => void;
+  right?: ReactNode;
+}) {
   return (
     <div className="flex h-9 flex-none items-end gap-4 border-b border-line px-3" role="tablist">
       {tabs.map((t) => (
@@ -39,7 +52,10 @@ export function Tabs<T extends string>({ tabs, value, onChange, right }: { tabs:
           role="tab"
           aria-selected={value === t.id}
           onClick={() => onChange(t.id)}
-          className={cx("relative -mb-px flex h-9 items-center gap-1.5 border-b-2 text-sm transition-colors", value === t.id ? "border-paper text-fg" : "border-transparent text-fg-3 hover:text-fg-2")}
+          className={cx(
+            "relative -mb-px flex h-9 items-center gap-1.5 border-b-2 text-sm transition-colors",
+            value === t.id ? "border-paper text-fg" : "border-transparent text-fg-3 hover:text-fg-2",
+          )}
         >
           {t.label}
           {t.count ? <span className="font-mono text-xs text-fg-3">{t.count}</span> : null}
@@ -131,7 +147,14 @@ export function KVTable({
       <div className="overflow-hidden rounded-md border border-line">
         {rows.map((r, i) => (
           <div key={i} className="group grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_28px] divide-x divide-line border-b border-line">
-            <input className={cx(cell, keyMono && "font-mono")} value={r.key} placeholder={keyPh} aria-label="Name" spellCheck={false} onChange={(e) => onChange(rows.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))} />
+            <input
+              className={cx(cell, keyMono && "font-mono")}
+              value={r.key}
+              placeholder={keyPh}
+              aria-label="Name"
+              spellCheck={false}
+              onChange={(e) => onChange(rows.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))}
+            />
             <input
               className={cx(cell, "font-mono")}
               type={secret && !reveal ? "password" : "text"}
@@ -141,17 +164,28 @@ export function KVTable({
               spellCheck={false}
               onChange={(e) => onChange(rows.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
             />
-            <button className="grid place-items-center text-fg-3 opacity-0 group-hover:opacity-100 hover:text-bad-soft focus-visible:opacity-100" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label="Remove row">
+            <button
+              className="grid place-items-center text-fg-3 opacity-0 group-hover:opacity-100 hover:text-bad-soft focus-visible:opacity-100"
+              onClick={() => onChange(rows.filter((_, j) => j !== i))}
+              aria-label="Remove row"
+            >
               <X className="size-3.5" />
             </button>
           </div>
         ))}
         <div className="flex">
-          <button className="flex h-8 flex-1 items-center gap-1.5 px-2.5 text-sm text-fg-3 hover:bg-surface-2 hover:text-fg-2" onClick={() => onChange([...rows, { key: "", value: "" }])}>
+          <button
+            className="flex h-8 flex-1 items-center gap-1.5 px-2.5 text-sm text-fg-3 hover:bg-surface-2 hover:text-fg-2"
+            onClick={() => onChange([...rows, { key: "", value: "" }])}
+          >
             <Plus className="size-3.5" /> Add
           </button>
           {secret && rows.length > 0 && (
-            <button className="flex h-8 items-center gap-1.5 px-2.5 text-sm text-fg-3 hover:text-fg-2" onClick={() => setReveal((v) => !v)} aria-pressed={reveal}>
+            <button
+              className="flex h-8 items-center gap-1.5 px-2.5 text-sm text-fg-3 hover:text-fg-2"
+              onClick={() => setReveal((v) => !v)}
+              aria-pressed={reveal}
+            >
               {reveal ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />} {reveal ? "Hide" : "Show"} values
             </button>
           )}
@@ -174,10 +208,31 @@ export function Json({ text }: { text: string }) {
   JSON_TOKEN.lastIndex = 0;
   while ((m = JSON_TOKEN.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index));
-    if (m[1] && m[2]) out.push(<span key={k++} className="text-fg-2">{m[1]}</span>, m[2]);
-    else if (m[1]) out.push(<span key={k++} className="text-[#9fd36c]">{m[1]}</span>);
-    else if (m[3]) out.push(<span key={k++} className="text-[#c49bf2]">{m[3]}</span>);
-    else out.push(<span key={k++} className="text-[#e0b46c]">{m[4]}</span>);
+    if (m[1] && m[2])
+      out.push(
+        <span key={k++} className="text-fg-2">
+          {m[1]}
+        </span>,
+        m[2],
+      );
+    else if (m[1])
+      out.push(
+        <span key={k++} className="text-[#9fd36c]">
+          {m[1]}
+        </span>,
+      );
+    else if (m[3])
+      out.push(
+        <span key={k++} className="text-[#c49bf2]">
+          {m[3]}
+        </span>,
+      );
+    else
+      out.push(
+        <span key={k++} className="text-[#e0b46c]">
+          {m[4]}
+        </span>,
+      );
     last = JSON_TOKEN.lastIndex;
   }
   out.push(text.slice(last));

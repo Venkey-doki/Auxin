@@ -2,7 +2,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HttpRequest, HttpResponse } from "../lib/api";
 
-const http = vi.hoisted(() => ({ handler: (_r: HttpRequest): Promise<HttpResponse> => Promise.reject("unset"), sent: [] as HttpRequest[], writes: [] as [string, string][], disk: [] as [string, string][], filesChanged: null as null | ((root: string) => void) }));
+const http = vi.hoisted(() => ({
+  handler: (_r: HttpRequest): Promise<HttpResponse> => Promise.reject("unset"),
+  sent: [] as HttpRequest[],
+  writes: [] as [string, string][],
+  disk: [] as [string, string][],
+  filesChanged: null as null | ((root: string) => void),
+}));
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -32,7 +38,20 @@ import { api } from "../lib/api";
 import { editTopology, loadTopology, useMap } from "../map/store";
 import { appendLogs } from "../state/logs";
 import { useStore } from "../state/store";
-import { blankBlock, blankQueueStep, blankStep, isStep, newFlow, parseEnv, serializeFlow, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
+import {
+  blankBlock,
+  blankQueueStep,
+  blankStep,
+  isStep,
+  newFlow,
+  parseEnv,
+  serializeFlow,
+  type FlowDoc,
+  type FlowItem,
+  type FlowStep,
+  type IfBlock,
+  type ParallelBlock,
+} from "./model";
 import { cancelRun, cancelStep, replayRun, runFlow, sendStep } from "./runner";
 import flowSchema from "./flow-2.schema.json";
 import { activeEnvName, createFlow, rk, saveEnv, saveEnvIn, sliceOf, syncWorkspace, updateFlow, useFlows, writeTo } from "./store";
@@ -40,7 +59,20 @@ import { activeEnvName, createFlow, rk, saveEnv, saveEnvIn, sliceOf, syncWorkspa
 const ROOT = "/w";
 const res = (status: number, body: unknown, extra: Partial<HttpResponse> = {}): HttpResponse => {
   const text = JSON.stringify(body);
-  return { status, statusText: "", headers: [["content-type", "application/json"]], contentType: "application/json", bodyText: text, bodyBase64: null, size: text.length, truncated: false, fullBodyPath: null, firstByteMs: 5, totalMs: 12, ...extra };
+  return {
+    status,
+    statusText: "",
+    headers: [["content-type", "application/json"]],
+    contentType: "application/json",
+    bodyText: text,
+    bodyBase64: null,
+    size: text.length,
+    truncated: false,
+    fullBodyPath: null,
+    firstByteMs: 5,
+    totalMs: 12,
+    ...extra,
+  };
 };
 const step = (p: Partial<FlowStep>): FlowStep => ({ ...blankStep(1), ...p });
 
@@ -50,7 +82,17 @@ function setup(steps: FlowItem[], opts: Partial<FlowDoc> = {}) {
     config: { version: 1, activeWorkspaceId: "w", workspaces: [{ id: "w", root: ROOT, name: "w", overrides: {}, manual: [], hidden: [], groups: [] }] },
     detected: [
       { id: `${ROOT}/gw`, name: "gw", path: `${ROOT}/gw`, kind: "node", framework: null, suggestions: [], defaultCommand: "x", venv: null, portHint: 4000 },
-      { id: `${ROOT}/model`, name: "model", path: `${ROOT}/model`, kind: "python", framework: null, suggestions: [], defaultCommand: "x", venv: null, portHint: 8000 },
+      {
+        id: `${ROOT}/model`,
+        name: "model",
+        path: `${ROOT}/model`,
+        kind: "python",
+        framework: null,
+        suggestions: [],
+        defaultCommand: "x",
+        venv: null,
+        portHint: 8000,
+      },
     ],
     runtime: { [`${ROOT}/gw`]: { status: "running", pid: 1 }, [`${ROOT}/model`]: { status: "running", pid: 2 } },
   });
@@ -88,7 +130,15 @@ describe("runFlow", () => {
       return res(200, { items: new Array(24).fill(1) });
     };
     const doc = setup([
-      step({ id: "a", method: "POST", url: "{{gw}}/jobs", headers: [{ key: "Authorization", value: "Bearer {{token}}" }], body: { kind: "json", text: '{"region":"{{region}}"}', form: [], file: "" }, extract: [{ key: "jobId", value: "body.jobId" }], checks: [{ left: "status", op: "==", right: "202" }] }),
+      step({
+        id: "a",
+        method: "POST",
+        url: "{{gw}}/jobs",
+        headers: [{ key: "Authorization", value: "Bearer {{token}}" }],
+        body: { kind: "json", text: '{"region":"{{region}}"}', form: [], file: "" },
+        extract: [{ key: "jobId", value: "body.jobId" }],
+        checks: [{ left: "status", op: "==", right: "202" }],
+      }),
       step({ id: "b", url: "{{model}}/jobs/{{jobId}}", poll: { until: [{ left: "body.status", op: "==", right: '"done"' }], everyMs: 10, maxTries: 5 } }),
       step({ id: "c", url: "{{gw}}/results/{{jobId}}", checks: [{ left: "body.items", op: "length ==", right: "24" }] }),
     ]);
@@ -129,7 +179,9 @@ describe("runFlow", () => {
 
   it("fails a poll that never meets its condition, saying how many tries", async () => {
     http.handler = async () => res(200, { status: "running" });
-    const doc = setup([step({ id: "a", url: "{{gw}}/jobs/1", poll: { until: [{ left: "body.status", op: "==", right: '"done"' }], everyMs: 5, maxTries: 3 } })]);
+    const doc = setup([
+      step({ id: "a", url: "{{gw}}/jobs/1", poll: { until: [{ left: "body.status", op: "==", right: '"done"' }], everyMs: 5, maxTries: 3 } }),
+    ]);
     await runFlow(doc.path);
     expect(http.sent).toHaveLength(3);
     expect(out("a").state).toBe("failed");
@@ -153,7 +205,10 @@ describe("runFlow", () => {
 
   it("can be cancelled mid-poll", async () => {
     http.handler = async () => res(200, { status: "running" });
-    const doc = setup([step({ id: "a", url: "{{gw}}/jobs/1", poll: { until: [{ left: "body.status", op: "==", right: '"done"' }], everyMs: 50, maxTries: 100 } }), step({ id: "b", url: "{{gw}}/b" })]);
+    const doc = setup([
+      step({ id: "a", url: "{{gw}}/jobs/1", poll: { until: [{ left: "body.status", op: "==", right: '"done"' }], everyMs: 50, maxTries: 100 } }),
+      step({ id: "b", url: "{{gw}}/b" }),
+    ]);
     const p = runFlow(doc.path);
     await new Promise((r) => setTimeout(r, 80));
     cancelRun(doc.path);
@@ -174,7 +229,13 @@ describe("runFlow", () => {
       ]);
       return res(202, { jobId: "8f2c1e" });
     };
-    const doc = setup([step({ id: "a", method: "POST", url: "{{gw}}/jobs" })], { services: [{ ref: "gw", alias: "gw" }, { ref: "model", alias: "model" }], graceMs: 5 });
+    const doc = setup([step({ id: "a", method: "POST", url: "{{gw}}/jobs" })], {
+      services: [
+        { ref: "gw", alias: "gw" },
+        { ref: "model", alias: "model" },
+      ],
+      graceMs: 5,
+    });
     await runFlow(doc.path);
     const t = out("a").trace!;
     expect(t.hops.map((h) => [h.alias, h.ok])).toEqual([
@@ -215,7 +276,16 @@ describe("review regressions", () => {
 
   it("history stores status/time readings but not other response values", async () => {
     http.handler = async () => res(200, { accessToken: "tok_live_ABCDEF123456" });
-    const doc = setup([step({ id: "a", url: "{{gw}}/login", checks: [{ left: "status", op: "==", right: "200" }, { left: "body.accessToken", op: "==", right: '"x"' }] })]);
+    const doc = setup([
+      step({
+        id: "a",
+        url: "{{gw}}/login",
+        checks: [
+          { left: "status", op: "==", right: "200" },
+          { left: "body.accessToken", op: "==", right: '"x"' },
+        ],
+      }),
+    ]);
     await runFlow(doc.path);
     const rec = JSON.parse(http.writes.find(([p]) => p.startsWith("runs/"))![1]);
     expect(rec.steps[0].checks[0].got).toBe("200");
@@ -226,7 +296,13 @@ describe("review regressions", () => {
   it("history keeps the body as sent, and hides tokens extracted into later URLs", async () => {
     http.handler = async (r) => (r.url.endsWith("/login") ? res(200, { accessToken: "tok_live_ABCDEF123456" }) : res(200, {}));
     const doc = setup([
-      step({ id: "a", url: "{{gw}}/login", method: "POST", body: { kind: "json", text: '{"region": "{{region}}", "key": "{{token}}"}', form: [], file: "" }, extract: [{ key: "accessToken", value: "body.accessToken" }] }),
+      step({
+        id: "a",
+        url: "{{gw}}/login",
+        method: "POST",
+        body: { kind: "json", text: '{"region": "{{region}}", "key": "{{token}}"}', form: [], file: "" },
+        extract: [{ key: "accessToken", value: "body.accessToken" }],
+      }),
       step({ id: "b", url: "{{gw}}/me?access_token={{accessToken}}" }),
     ]);
     await runFlow(doc.path);
@@ -274,7 +350,13 @@ describe("review regressions", () => {
       appendLogs([{ id: `${ROOT}/model`, stream: "stdout", text: "worker still running", ts: Date.now() }]);
       return r.url.endsWith("/a") ? res(200, { status: "running" }) : res(200, {});
     };
-    const doc = setup([step({ id: "a", url: "{{gw}}/a", extract: [{ key: "st", value: "body.status" }] })], { services: [{ ref: "gw", alias: "gw" }, { ref: "model", alias: "model" }], graceMs: 5 });
+    const doc = setup([step({ id: "a", url: "{{gw}}/a", extract: [{ key: "st", value: "body.status" }] })], {
+      services: [
+        { ref: "gw", alias: "gw" },
+        { ref: "model", alias: "model" },
+      ],
+      graceMs: 5,
+    });
     await runFlow(doc.path);
     expect(out("a").trace!.lines).toEqual([]);
   });
@@ -282,7 +364,10 @@ describe("review regressions", () => {
   it("a running service wins its port over a stopped service's hint", async () => {
     setup([]);
     useStore.setState((s) => ({
-      detected: [...s.detected, { id: `${ROOT}/ml`, name: "ml", path: `${ROOT}/ml`, kind: "python", framework: null, suggestions: [], defaultCommand: "x", venv: null, portHint: 9000 }],
+      detected: [
+        ...s.detected,
+        { id: `${ROOT}/ml`, name: "ml", path: `${ROOT}/ml`, kind: "python", framework: null, suggestions: [], defaultCommand: "x", venv: null, portHint: 9000 },
+      ],
       runtime: { ...s.runtime, [`${ROOT}/model`]: { status: "running", pid: 2, port: 9000 } },
     }));
     const { servicePorts } = await import("./store");
@@ -339,7 +424,12 @@ describe("control flow, history and replay", () => {
     http.handler = async (r) => (r.url.endsWith("/find") ? res(404, {}) : res(201, { token: "tok_live_123456" }));
     const doc = setup([
       step({ id: "find", url: "{{gw}}/find", onFailure: "continue" }),
-      ifBlock({ id: "if1", when: [{ left: "status", op: "==", right: "404" }], then: [step({ id: "create", method: "POST", url: "{{gw}}/create" })], else: [step({ id: "read", url: "{{gw}}/read" })] }),
+      ifBlock({
+        id: "if1",
+        when: [{ left: "status", op: "==", right: "404" }],
+        then: [step({ id: "create", method: "POST", url: "{{gw}}/create" })],
+        else: [step({ id: "read", url: "{{gw}}/read" })],
+      }),
       parallel({ id: "p1", steps: [step({ id: "p", url: "{{gw}}/p" }), step({ id: "q", url: "{{gw}}/q" })] }),
     ]);
     await runFlow(doc.path);
@@ -350,7 +440,11 @@ describe("control flow, history and replay", () => {
     // find failed (404) but continues, so the run is failed overall.
     expect(run.status).toBe("failed");
     const rec = record();
-    expect(rec).toMatchObject({ version: 2, branches: { if1: "then" }, snapshot: { version: 2, steps: [{ id: "find" }, { id: "if1", type: "if" }, { id: "p1", type: "parallel" }] } });
+    expect(rec).toMatchObject({
+      version: 2,
+      branches: { if1: "then" },
+      snapshot: { version: 2, steps: [{ id: "find" }, { id: "if1", type: "if" }, { id: "p1", type: "parallel" }] },
+    });
     const created = rec.steps.find((s: { id: string }) => s.id === "create");
     expect(created.response).toMatchObject({ status: 201 });
     expect(created.response.body).toContain("••••••");
@@ -422,8 +516,14 @@ describe("project map handover", () => {
         JSON.stringify({
           version: 1,
           name: "Old",
-          services: [{ ref: "gw", alias: "gateway" }, { ref: "model", alias: "model" }],
-          directions: [{ from: "gateway", to: "model", source: "env", evidence: "x", confirmed: true }, { from: "model", to: "gateway", source: "code", evidence: "y", confirmed: false }],
+          services: [
+            { ref: "gw", alias: "gateway" },
+            { ref: "model", alias: "model" },
+          ],
+          directions: [
+            { from: "gateway", to: "model", source: "env", evidence: "x", confirmed: true },
+            { from: "model", to: "gateway", source: "code", evidence: "y", confirmed: false },
+          ],
           dismissed: [{ from: "model", to: "gateway" }],
           steps: [],
         }),
@@ -444,7 +544,14 @@ describe("queue steps in a run", () => {
     const calls: { kind: string; id: string; waitMs?: number; traceIds?: string[] }[] = [];
     vi.mocked(api).stepExec = vi.fn(async (req) => {
       calls.push(req as never);
-      if (req.kind === "queue.consume") return req.waitMs === 0 ? { kind: "queue.consume", messages: [], skipped: 0 } : { kind: "queue.consume", messages: [{ source: "orders", headers: [], bodyText: '{"ok":true}', bodyBase64: null, size: 11, receivedAt: 1 }], skipped: 0 };
+      if (req.kind === "queue.consume")
+        return req.waitMs === 0
+          ? { kind: "queue.consume", messages: [], skipped: 0 }
+          : {
+              kind: "queue.consume",
+              messages: [{ source: "orders", headers: [], bodyText: '{"ok":true}', bodyBase64: null, size: 11, receivedAt: 1 }],
+              skipped: 0,
+            };
       return { kind: "queue.publish", ms: 3, destination: "orders", partition: null, offset: null };
     }) as never;
     vi.mocked(api).stepCancel = vi.fn(async () => true) as never;
@@ -484,10 +591,22 @@ describe("OpenTelemetry spans", () => {
       ];
     }) as never;
     http.handler = async () => res(200, {});
-    const doc = setup([step({ id: "a", url: "{{gw}}/jobs" })], { services: [{ ref: "gw", alias: "gateway" }, { ref: "model", alias: "model" }], graceMs: 5 });
+    const doc = setup([step({ id: "a", url: "{{gw}}/jobs" })], {
+      services: [
+        { ref: "gw", alias: "gateway" },
+        { ref: "model", alias: "model" },
+      ],
+      graceMs: 5,
+    });
     await runFlow(doc.path);
     expect(asked).toEqual([out("a").traceId]);
-    expect(out("a").trace).toMatchObject({ source: "otel", hops: [{ alias: "gateway", ms: 40, ok: true, approx: false }, { alias: "model", ms: 30, ok: false }] });
+    expect(out("a").trace).toMatchObject({
+      source: "otel",
+      hops: [
+        { alias: "gateway", ms: 40, ok: true, approx: false },
+        { alias: "model", ms: 30, ok: false },
+      ],
+    });
     expect(out("a").spans).toHaveLength(2);
     expect(useMap.getState().observed).toEqual([expect.objectContaining({ from: "gw", to: "model", source: "otel" })]);
     useStore.setState({ otel: null });
@@ -499,7 +618,15 @@ describe("running in another environment", () => {
     http.handler = async () => res(200, {});
     const doc = setup([step({ id: "a", url: "{{gw}}/x/{{region}}" })]);
     useFlows.setState((s) => ({
-      envs: { ...s.envs, staging: { ...parseEnv("staging"), vars: { region: "US" }, baseUrls: { gw: "https://staging.example.com" }, network: { allowPrivate: false, allowHosts: ["*.example.com"] } } },
+      envs: {
+        ...s.envs,
+        staging: {
+          ...parseEnv("staging"),
+          vars: { region: "US" },
+          baseUrls: { gw: "https://staging.example.com" },
+          network: { allowPrivate: false, allowHosts: ["*.example.com"] },
+        },
+      },
     }));
     await runFlow(doc.path, { env: "staging" });
     expect(http.sent[0].url).toBe("https://staging.example.com/x/US");
@@ -565,7 +692,21 @@ describe("saving to the right workspace", () => {
 
   it("a topology.json that won't parse is never written over, and old flow links wait in their files", async () => {
     vi.mocked(api.auxinRead).mockImplementation(async (_root: string, path: string) => (path === "topology.json" ? "<<<<<<< HEAD\n{}" : "{}"));
-    http.disk = [["flows/old.flow.json", JSON.stringify({ version: 1, name: "Old", services: [{ ref: "gw", alias: "gw" }, { ref: "model", alias: "model" }], directions: [{ from: "gw", to: "model", confirmed: true }], steps: [] })]];
+    http.disk = [
+      [
+        "flows/old.flow.json",
+        JSON.stringify({
+          version: 1,
+          name: "Old",
+          services: [
+            { ref: "gw", alias: "gw" },
+            { ref: "model", alias: "model" },
+          ],
+          directions: [{ from: "gw", to: "model", confirmed: true }],
+          steps: [],
+        }),
+      ],
+    ];
     const write = vi.mocked(api.auxinWrite);
     await syncWorkspace(null);
     write.mockClear();

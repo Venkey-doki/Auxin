@@ -18,7 +18,12 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager as _, RunEvent, State};
 
 #[tauri::command]
-async fn step_exec(app: AppHandle, state: State<'_, Arc<http::HttpState>>, queue: State<'_, Arc<queue::QueueState>>, req: steps::StepRequest) -> Result<steps::StepResult, String> {
+async fn step_exec(
+    app: AppHandle,
+    state: State<'_, Arc<http::HttpState>>,
+    queue: State<'_, Arc<queue::QueueState>>,
+    req: steps::StepRequest,
+) -> Result<steps::StepResult, String> {
     let temp = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("responses");
     steps::exec(state.inner().clone(), queue.inner().clone(), req, temp).await
 }
@@ -93,10 +98,7 @@ async fn scan_workspace(root: String) -> Result<Vec<scan::DetectedService>, Stri
 #[tauri::command]
 async fn inspect_folder(path: String) -> Option<scan::DetectedService> {
     let path = PathBuf::from(path);
-    tauri::async_runtime::spawn_blocking(move || scan::scan(&path).into_iter().find(|s| std::path::Path::new(&s.path) == path))
-        .await
-        .ok()
-        .flatten()
+    tauri::async_runtime::spawn_blocking(move || scan::scan(&path).into_iter().find(|s| std::path::Path::new(&s.path) == path)).await.ok().flatten()
 }
 
 #[tauri::command]
@@ -134,9 +136,7 @@ fn otel_spans(otel: State<'_, Arc<otel::OtelState>>, trace_ids: Vec<String>) -> 
 #[tauri::command]
 fn check_port(port: u16) -> bool {
     ["127.0.0.1", "::1"].iter().any(|host| {
-        let addr: SocketAddr = format!("{}:{port}", if host.contains(':') { format!("[{host}]") } else { host.to_string() })
-            .parse()
-            .unwrap();
+        let addr: SocketAddr = format!("{}:{port}", if host.contains(':') { format!("[{host}]") } else { host.to_string() }).parse().unwrap();
         TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
     })
 }

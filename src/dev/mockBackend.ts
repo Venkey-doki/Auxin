@@ -35,10 +35,43 @@ const SERVICES: DetectedService[] = [
 ];
 
 const SCRIPTS: Record<string, { port: number; lines: string[]; crash?: boolean }> = {
-  "api-gateway": { port: 4000, lines: ["[nodemon] 3.1.4", "[nodemon] watching path(s): src/**/*", "\u001b[32minfo\u001b[39m: Connected to Redis at 127.0.0.1:6379", "\u001b[32minfo\u001b[39m: Gateway listening on http://localhost:4000"] },
-  "auth-service": { port: 3001, lines: ["\u001b[32m[Nest] 48211  - \u001b[39mStarting Nest application...", "\u001b[32m[Nest] 48211  - \u001b[39m\u001b[33m[InstanceLoader]\u001b[39m AuthModule dependencies initialized", "\u001b[32m[Nest] 48211  - \u001b[39mNest application successfully started on port 3001"] },
-  "billing-worker": { port: 8081, lines: ["INFO:     Started server process [48302]", "INFO:     Waiting for application startup.", "INFO:     Application startup complete.", "INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)"] },
-  "queue-router": { port: 0, crash: true, lines: ["> queue-router@1.4.0 dev", "> nodemon index.js", "Loading routes.json", "Error: connect ECONNREFUSED 127.0.0.1:8000", "    at TCPConnectWrapper.afterConnect [as oncomplete] (node:net:1607:16)"] },
+  "api-gateway": {
+    port: 4000,
+    lines: [
+      "[nodemon] 3.1.4",
+      "[nodemon] watching path(s): src/**/*",
+      "\u001b[32minfo\u001b[39m: Connected to Redis at 127.0.0.1:6379",
+      "\u001b[32minfo\u001b[39m: Gateway listening on http://localhost:4000",
+    ],
+  },
+  "auth-service": {
+    port: 3001,
+    lines: [
+      "\u001b[32m[Nest] 48211  - \u001b[39mStarting Nest application...",
+      "\u001b[32m[Nest] 48211  - \u001b[39m\u001b[33m[InstanceLoader]\u001b[39m AuthModule dependencies initialized",
+      "\u001b[32m[Nest] 48211  - \u001b[39mNest application successfully started on port 3001",
+    ],
+  },
+  "billing-worker": {
+    port: 8081,
+    lines: [
+      "INFO:     Started server process [48302]",
+      "INFO:     Waiting for application startup.",
+      "INFO:     Application startup complete.",
+      "INFO:     Uvicorn running on http://0.0.0.0:8081 (Press CTRL+C to quit)",
+    ],
+  },
+  "queue-router": {
+    port: 0,
+    crash: true,
+    lines: [
+      "> queue-router@1.4.0 dev",
+      "> nodemon index.js",
+      "Loading routes.json",
+      "Error: connect ECONNREFUSED 127.0.0.1:8000",
+      "    at TCPConnectWrapper.afterConnect [as oncomplete] (node:net:1607:16)",
+    ],
+  },
 };
 
 const live = new Map<string, number>();
@@ -50,28 +83,35 @@ function log(id: string, text: string, stream = "stdout") {
 
 function startFake(id: string, command: string) {
   const name = id.split("/").pop()!;
-  const script = SCRIPTS[name] ?? { port: 5000 + (name.length % 9) * 100, lines: [`${name} booting`, `ready on http://localhost:${5000 + (name.length % 9) * 100}`] };
+  const script = SCRIPTS[name] ?? {
+    port: 5000 + (name.length % 9) * 100,
+    lines: [`${name} booting`, `ready on http://localhost:${5000 + (name.length % 9) * 100}`],
+  };
   const p = ++pid;
   live.set(id, p);
   void emit("auxin://status", { id, status: "running", pid: p, code: null, ts: Date.now() });
   log(id, `$ ${command}`, "system");
-  script.lines.forEach((l, i) =>
-    setTimeout(() => live.get(id) === p && log(id, l, /error|at /i.test(l) ? "stderr" : "stdout"), 300 + i * 450),
-  );
+  script.lines.forEach((l, i) => setTimeout(() => live.get(id) === p && log(id, l, /error|at /i.test(l) ? "stderr" : "stdout"), 300 + i * 450));
   if (script.crash) {
-    setTimeout(() => {
-      if (live.get(id) !== p) return;
-      live.delete(id);
-      log(id, "Process exited with code 1", "system");
-      void emit("auxin://status", { id, status: "crashed", pid: null, code: 1, ts: Date.now() });
-    }, 300 + script.lines.length * 450);
+    setTimeout(
+      () => {
+        if (live.get(id) !== p) return;
+        live.delete(id);
+        log(id, "Process exited with code 1", "system");
+        void emit("auxin://status", { id, status: "crashed", pid: null, code: 1, ts: Date.now() });
+      },
+      300 + script.lines.length * 450,
+    );
   } else {
     // Chatter, so the follow-tail and merged views have something to show.
-    const tick = setInterval(() => {
-      if (live.get(id) !== p) return clearInterval(tick);
-      const ms = Math.round(Math.random() * 180 + 4);
-      log(id, `\u001b[2m${new Date().toISOString()}\u001b[22m GET /health 200 ${ms}ms`);
-    }, 1800 + Math.random() * 1500);
+    const tick = setInterval(
+      () => {
+        if (live.get(id) !== p) return clearInterval(tick);
+        const ms = Math.round(Math.random() * 180 + 4);
+        log(id, `\u001b[2m${new Date().toISOString()}\u001b[22m GET /health 200 ${ms}ms`);
+      },
+      1800 + Math.random() * 1500,
+    );
   }
 }
 
@@ -130,10 +170,12 @@ const files = new Map<string, string>([
       2,
     ),
   ],
-  ["env/local.json", JSON.stringify({ vars: { region: "eu-west" }, baseUrls: {}, brokers: { rabbit: { type: "rabbitmq", url: "amqp://guest:guest@localhost:5672" } } }, null, 2)],
+  [
+    "env/local.json",
+    JSON.stringify({ vars: { region: "eu-west" }, baseUrls: {}, brokers: { rabbit: { type: "rabbitmq", url: "amqp://guest:guest@localhost:5672" } } }, null, 2),
+  ],
   ["env/local.secret.json", JSON.stringify({ vars: { token: "dev-preview-token" } }, null, 2)],
 ]);
-
 
 /** Answers like a running dev server would; refuses when the service is stopped. */
 const polls = new Map<string, number>();
@@ -144,7 +186,15 @@ type MockMsg = { source: string; routingKey: string | null; headers: [string, st
 const subs = new Map<string, { source: string; buffer: MockMsg[] }>();
 
 async function fakePublish(req: { destination: string; routingKey: string | null; headers: [string, string][]; body: string }) {
-  const msg: MockMsg = { source: req.destination, routingKey: req.routingKey, headers: req.headers, bodyText: req.body, bodyBase64: null, size: req.body.length, receivedAt: Date.now() };
+  const msg: MockMsg = {
+    source: req.destination,
+    routingKey: req.routingKey,
+    headers: req.headers,
+    bodyText: req.body,
+    bodyBase64: null,
+    size: req.body.length,
+    receivedAt: Date.now(),
+  };
   await new Promise((r) => setTimeout(r, 30));
   for (const sub of subs.values()) if (sub.source === req.destination) sub.buffer.push(msg);
   // Pretend a worker reacted: it publishes the "paid" event on the same exchange a moment later.
@@ -156,7 +206,12 @@ async function fakeConsume(req: { id: string; source: string; waitMs: number; tr
   if (!subs.has(req.id)) subs.set(req.id, { source: req.source, buffer: [] });
   const sub = subs.get(req.id)!;
   // As the backend does: each read filters by the ids it brings (a run opens before it knows them).
-  const mine = (m: MockMsg) => !req.traceIds.length || m.headers.some(([k, v]) => (k.toLowerCase() === "traceparent" && req.traceIds.some((id) => v.includes(id))) || (k.toLowerCase() === "x-request-id" && req.traceIds.includes(v)));
+  const mine = (m: MockMsg) =>
+    !req.traceIds.length ||
+    m.headers.some(
+      ([k, v]) =>
+        (k.toLowerCase() === "traceparent" && req.traceIds.some((id) => v.includes(id))) || (k.toLowerCase() === "x-request-id" && req.traceIds.includes(v)),
+    );
   let skipped = 0;
   const take = () => {
     const all = sub.buffer.splice(0);
@@ -172,17 +227,68 @@ async function fakeConsume(req: { id: string; source: string; waitMs: number; tr
 }
 
 /** Spans an instrumented stack would send: the called service, then each service it calls. */
-type MockSpan = { traceId: string; spanId: string; parentSpanId: string | null; name: string; kind: string; service: string; startMs: number; durationMs: number; status: string; statusMessage: null; attributes: [string, string][]; links: [] };
+type MockSpan = {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string | null;
+  name: string;
+  kind: string;
+  service: string;
+  startMs: number;
+  durationMs: number;
+  status: string;
+  statusMessage: null;
+  attributes: [string, string][];
+  links: [];
+};
 const spans = new Map<string, MockSpan[]>();
 const hex = (n: number) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join("");
 
 function recordSpans(traceId: string, parent: string, service: string, method: string, path: string) {
   const t = Date.now();
-  const root: MockSpan = { traceId, spanId: hex(16), parentSpanId: parent, name: `${method} ${path}`, kind: "server", service, startMs: t, durationMs: 180, status: "unset", statusMessage: null, attributes: [["http.request.method", method], ["url.path", path], ["http.response.status_code", method === "POST" ? "202" : "200"]], links: [] };
+  const root: MockSpan = {
+    traceId,
+    spanId: hex(16),
+    parentSpanId: parent,
+    name: `${method} ${path}`,
+    kind: "server",
+    service,
+    startMs: t,
+    durationMs: 180,
+    status: "unset",
+    statusMessage: null,
+    attributes: [
+      ["http.request.method", method],
+      ["url.path", path],
+      ["http.response.status_code", method === "POST" ? "202" : "200"],
+    ],
+    links: [],
+  };
   const list = [root];
   (downstream[service] ?? []).forEach((next, i) => {
-    const call: MockSpan = { ...root, spanId: hex(16), parentSpanId: root.spanId, name: `GET ${next}`, kind: "client", startMs: t + 20 + i * 70, durationMs: 60, attributes: [["http.request.method", "GET"], ["server.address", "127.0.0.1"]] };
-    list.push(call, { ...call, spanId: hex(16), parentSpanId: call.spanId, kind: "server", service: next, startMs: call.startMs + 4, durationMs: 50, attributes: [["http.route", "/internal"]] });
+    const call: MockSpan = {
+      ...root,
+      spanId: hex(16),
+      parentSpanId: root.spanId,
+      name: `GET ${next}`,
+      kind: "client",
+      startMs: t + 20 + i * 70,
+      durationMs: 60,
+      attributes: [
+        ["http.request.method", "GET"],
+        ["server.address", "127.0.0.1"],
+      ],
+    };
+    list.push(call, {
+      ...call,
+      spanId: hex(16),
+      parentSpanId: call.spanId,
+      kind: "server",
+      service: next,
+      startMs: call.startMs + 4,
+      durationMs: 50,
+      attributes: [["http.route", "/internal"]],
+    });
   });
   spans.set(traceId, [...(spans.get(traceId) ?? []), ...list]);
 }
@@ -200,7 +306,12 @@ async function fakeHttp(req: { method: string; url: string; headers: [string, st
   const rid = req.headers.find(([k]) => k.toLowerCase() === "x-request-id")?.[1] ?? "-";
   const tp = req.headers.find(([k]) => k.toLowerCase() === "traceparent")?.[1]?.split("-");
   if (tp) recordSpans(tp[1], tp[2], name, req.method, u.pathname);
-  const jobId = u.pathname.split("/").pop()?.match(/^[0-9a-f]{6}$/) ? u.pathname.split("/").pop()! : "8f2c1e";
+  const jobId = u.pathname
+    .split("/")
+    .pop()
+    ?.match(/^[0-9a-f]{6}$/)
+    ? u.pathname.split("/").pop()!
+    : "8f2c1e";
   log(idOf(name)!, `${req.method} ${u.pathname} req=${rid}`);
   await new Promise((r) => setTimeout(r, 60));
   for (const next of downstream[name] ?? []) {
@@ -209,7 +320,14 @@ async function fakeHttp(req: { method: string; url: string; headers: [string, st
   }
   await new Promise((r) => setTimeout(r, 80 + Math.random() * 120));
 
-  let payload: Record<string, unknown> = { ok: true, service: name, method: req.method, path: u.pathname, received: req.body.kind === "text" ? safeJson(req.body.value!) : null, jobId };
+  let payload: Record<string, unknown> = {
+    ok: true,
+    service: name,
+    method: req.method,
+    path: u.pathname,
+    received: req.body.kind === "text" ? safeJson(req.body.value!) : null,
+    jobId,
+  };
   if (u.pathname.startsWith("/jobs/")) {
     const n = (polls.get(rid.slice(0, 8) + u.pathname) ?? 0) + 1;
     polls.set(rid.slice(0, 8) + u.pathname, n);
@@ -223,7 +341,10 @@ async function fakeHttp(req: { method: string; url: string; headers: [string, st
   return {
     status: req.method === "POST" ? 202 : 200,
     statusText: req.method === "POST" ? "Accepted" : "OK",
-    headers: [["content-type", "application/json"], ["x-powered-by", name]],
+    headers: [
+      ["content-type", "application/json"],
+      ["x-powered-by", name],
+    ],
     contentType: "application/json",
     bodyText: body,
     bodyBase64: null,
@@ -300,7 +421,10 @@ export function installMockBackend() {
         case "http_drop_jar":
           return null;
         case "auxin_list_dir":
-          return [...files.keys()].filter((k) => k.startsWith(a.path + "/")).map((k) => k.slice(a.path.length + 1)).sort();
+          return [...files.keys()]
+            .filter((k) => k.startsWith(a.path + "/"))
+            .map((k) => k.slice(a.path.length + 1))
+            .sort();
         case "auxin_read":
           if (!files.has(a.path)) throw `No such file: ${a.path}`;
           return files.get(a.path);
@@ -309,20 +433,73 @@ export function installMockBackend() {
           const keys = new Set(a.services.map((x: { key: string }) => x.key));
           const edges = [
             { from: "api-gateway", to: "auth-service", kind: "http", evidence: ev("env", "inferred", "api-gateway/.env:4  AUTH_URL=http://localhost:3001") },
-            { from: "auth-service", to: "billing-worker", kind: "http", evidence: ev("config", "inferred", 'auth-service/config/default.json:12  "billing": "http://localhost:8081"') },
+            {
+              from: "auth-service",
+              to: "billing-worker",
+              kind: "http",
+              evidence: ev("config", "inferred", 'auth-service/config/default.json:12  "billing": "http://localhost:8081"'),
+            },
             { from: "api-gateway", to: "postgres", kind: "database", evidence: ev("compose", "declared", "docker-compose.yml:9  depends_on: [postgres]") },
-            { from: "db-migrations", to: "postgres", kind: "database", evidence: ev("env", "inferred", "db-migrations/.env:1  DATABASE_URL=postgres://••••@localhost:5432/app") },
+            {
+              from: "db-migrations",
+              to: "postgres",
+              kind: "database",
+              evidence: ev("env", "inferred", "db-migrations/.env:1  DATABASE_URL=postgres://••••@localhost:5432/app"),
+            },
             { from: "billing-worker", to: "rabbitmq", kind: "queue", evidence: ev("compose", "declared", "docker-compose.yml:21  depends_on: [rabbitmq]") },
-            { from: "queue-router", to: "rabbitmq", kind: "queue", evidence: ev("env", "inferred", "queue-router/.env:2  AMQP_URL=amqp://••••@localhost:5672") },
-            { from: "pricing-model", to: "redis", kind: "cache", evidence: ev("config", "inferred", "pricing-model/settings.py:14  REDIS_URL = \"redis://localhost:6379\"") },
-            { from: "billing-worker", to: "ext:api.stripe.com", kind: "http", evidence: ev("env", "inferred", "billing-worker/.env:5  STRIPE_URL=https://api.stripe.com") },
+            {
+              from: "queue-router",
+              to: "rabbitmq",
+              kind: "queue",
+              evidence: ev("env", "inferred", "queue-router/.env:2  AMQP_URL=amqp://••••@localhost:5672"),
+            },
+            {
+              from: "pricing-model",
+              to: "redis",
+              kind: "cache",
+              evidence: ev("config", "inferred", 'pricing-model/settings.py:14  REDIS_URL = "redis://localhost:6379"'),
+            },
+            {
+              from: "billing-worker",
+              to: "ext:api.stripe.com",
+              kind: "http",
+              evidence: ev("env", "inferred", "billing-worker/.env:5  STRIPE_URL=https://api.stripe.com"),
+            },
           ];
           return {
             nodes: [
-              { key: "postgres", kind: "database", label: "postgres", tech: "postgres", endpoint: "localhost:5432", evidence: ev("compose", "declared", "docker-compose.yml:30  image: postgres:16") },
-              { key: "rabbitmq", kind: "queue", label: "rabbitmq", tech: "rabbitmq", endpoint: "localhost:5672", evidence: ev("compose", "declared", "docker-compose.yml:36  image: rabbitmq:3-management") },
-              { key: "redis@localhost:6379", kind: "cache", label: "redis", tech: "redis", endpoint: "localhost:6379", evidence: ev("config", "inferred", "pricing-model/settings.py:14") },
-              { key: "ext:api.stripe.com", kind: "external", label: "api.stripe.com", tech: null, endpoint: "api.stripe.com:443", evidence: ev("env", "inferred", "billing-worker/.env:5") },
+              {
+                key: "postgres",
+                kind: "database",
+                label: "postgres",
+                tech: "postgres",
+                endpoint: "localhost:5432",
+                evidence: ev("compose", "declared", "docker-compose.yml:30  image: postgres:16"),
+              },
+              {
+                key: "rabbitmq",
+                kind: "queue",
+                label: "rabbitmq",
+                tech: "rabbitmq",
+                endpoint: "localhost:5672",
+                evidence: ev("compose", "declared", "docker-compose.yml:36  image: rabbitmq:3-management"),
+              },
+              {
+                key: "redis@localhost:6379",
+                kind: "cache",
+                label: "redis",
+                tech: "redis",
+                endpoint: "localhost:6379",
+                evidence: ev("config", "inferred", "pricing-model/settings.py:14"),
+              },
+              {
+                key: "ext:api.stripe.com",
+                kind: "external",
+                label: "api.stripe.com",
+                tech: null,
+                endpoint: "api.stripe.com:443",
+                evidence: ev("env", "inferred", "billing-worker/.env:5"),
+              },
             ],
             edges: edges
               .map((e) => (e.to === "redis" ? { ...e, to: "redis@localhost:6379" } : e))

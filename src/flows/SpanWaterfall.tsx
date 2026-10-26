@@ -12,7 +12,14 @@ import { selectServices, serviceForSpan, useStore } from "../state/store";
 import { formatMs } from "./parts";
 import { spanRows, spanSummary } from "./spans";
 
-const KIND_SHORT: Record<Span["kind"], string> = { unspecified: "", internal: "", server: "server", client: "client", producer: "publish", consumer: "consume" };
+const KIND_SHORT: Record<Span["kind"], string> = {
+  unspecified: "",
+  internal: "",
+  server: "server",
+  client: "client",
+  producer: "publish",
+  consumer: "consume",
+};
 
 export function SpanWaterfall({ spans, traceId }: { spans: Span[]; traceId?: string }) {
   const services = useStore(selectServices);
@@ -38,7 +45,10 @@ export function SpanWaterfall({ spans, traceId }: { spans: Span[]; traceId?: str
               </div>
             )}
             <button
-              className={cx("grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_64px] items-center gap-3 px-4 py-0.5 text-left text-sm hover:bg-surface-2", isOpen && "bg-surface-2")}
+              className={cx(
+                "grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)_64px] items-center gap-3 px-4 py-0.5 text-left text-sm hover:bg-surface-2",
+                isOpen && "bg-surface-2",
+              )}
               onClick={() => setOpen(isOpen ? null : s.spanId)}
               aria-expanded={isOpen}
               title={s.statusMessage ?? undefined}
@@ -51,7 +61,11 @@ export function SpanWaterfall({ spans, traceId }: { spans: Span[]; traceId?: str
               <span className="relative h-2 rounded-full bg-surface-3" aria-hidden>
                 <span
                   className="absolute inset-y-0 rounded-full"
-                  style={{ left: `${((s.startMs - t0) / total) * 100}%`, width: `${Math.max(1, (s.durationMs / total) * 100)}%`, background: bad ? "var(--color-bad)" : colorOf(s.service) }}
+                  style={{
+                    left: `${((s.startMs - t0) / total) * 100}%`,
+                    width: `${Math.max(1, (s.durationMs / total) * 100)}%`,
+                    background: bad ? "var(--color-bad)" : colorOf(s.service),
+                  }}
                 />
               </span>
               <span className={cx("text-right font-mono text-xs", bad ? "text-bad-soft" : "text-fg-3")}>{formatMs(Math.round(s.durationMs))}</span>

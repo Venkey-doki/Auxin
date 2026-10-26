@@ -8,7 +8,18 @@ import { create } from "zustand";
 import { api } from "../lib/api";
 import { activeWorkspace, selectServices, toast, updateActiveWorkspace, useStore } from "../state/store";
 import { updateFlow, useFlows, writeTo } from "../flows/store";
-import { emptyTopology, keepEdge, mergeTopology, removeEdge, parseTopology, serializeTopology, serviceKey, type Discovery, type Observation, type TopologyFile } from "./model";
+import {
+  emptyTopology,
+  keepEdge,
+  mergeTopology,
+  removeEdge,
+  parseTopology,
+  serializeTopology,
+  serviceKey,
+  type Discovery,
+  type Observation,
+  type TopologyFile,
+} from "./model";
 
 const TOPOLOGY = "topology.json";
 const OBSERVED = "runs/observed.json";
@@ -195,5 +206,8 @@ export function useTopology() {
   const file = useMap((s) => s.file);
   const observed = useMap((s) => s.observed);
   const discovery = useMap((s) => s.discovery);
-  return useMemo(() => (root ? mergeTopology({ root, services, discovery, observed, file }) : { nodes: [], edges: [] }), [root, services, discovery, observed, file]);
+  return useMemo(
+    () => (root ? mergeTopology({ root, services, discovery, observed, file }) : { nodes: [], edges: [] }),
+    [root, services, discovery, observed, file],
+  );
 }

@@ -10,23 +10,55 @@ const rec = (n: number, steps: [string, string, number | undefined][], status: R
   startedAt: new Date(Date.UTC(2026, 9, 26, 10, n)).toISOString(),
   finishedAt: new Date(Date.UTC(2026, 9, 26, 10, n, 1)).toISOString(),
   status,
-  steps: steps.map(([id, state, ms]) => ({ id, name: id.toUpperCase(), method: "GET", url: "u", state: state as never, ms, checks: [], extracted: [], hops: [] })),
+  steps: steps.map(([id, state, ms]) => ({
+    id,
+    name: id.toUpperCase(),
+    method: "GET",
+    url: "u",
+    state: state as never,
+    ms,
+    checks: [],
+    extracted: [],
+    hops: [],
+  })),
 });
 
 describe("trends", () => {
   it("nearest-rank percentiles", () => {
     expect(percentile([], 50)).toBeUndefined();
     expect(percentile([30, 10, 20], 50)).toBe(20);
-    expect(percentile([...Array(20).keys()].map((i) => i + 1), 95)).toBe(19);
+    expect(
+      percentile(
+        [...Array(20).keys()].map((i) => i + 1),
+        95,
+      ),
+    ).toBe(19);
     expect(percentile([5], 95)).toBe(5);
   });
 
   it("orders points oldest first, counts failures only among runs that sent the request", () => {
     // Newest first, as loadHistory returns them.
     const [whole, a, b] = flowTrends([
-      rec(3, [["a", "passed", 30], ["b", "skipped", undefined]], "failed"),
-      rec(2, [["a", "failed", 500], ["b", "skipped", undefined]], "failed"),
-      rec(1, [["a", "passed", 10], ["b", "passed", 40]]),
+      rec(
+        3,
+        [
+          ["a", "passed", 30],
+          ["b", "skipped", undefined],
+        ],
+        "failed",
+      ),
+      rec(
+        2,
+        [
+          ["a", "failed", 500],
+          ["b", "skipped", undefined],
+        ],
+        "failed",
+      ),
+      rec(1, [
+        ["a", "passed", 10],
+        ["b", "passed", 40],
+      ]),
     ]);
     expect(whole).toMatchObject({ name: "Whole run", runs: 3, failures: 2, p50: 1000 });
     expect(a.points.map((p) => [p.runId, p.ms, p.failed])).toEqual([

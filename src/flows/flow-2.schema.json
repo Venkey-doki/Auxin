@@ -32,7 +32,13 @@
     "steps": {
       "type": "array",
       "items": {
-        "oneOf": [{ "$ref": "#/$defs/httpStep" }, { "$ref": "#/$defs/publishStep" }, { "$ref": "#/$defs/consumeStep" }, { "$ref": "#/$defs/ifBlock" }, { "$ref": "#/$defs/parallelBlock" }]
+        "oneOf": [
+          { "$ref": "#/$defs/httpStep" },
+          { "$ref": "#/$defs/publishStep" },
+          { "$ref": "#/$defs/consumeStep" },
+          { "$ref": "#/$defs/ifBlock" },
+          { "$ref": "#/$defs/parallelBlock" }
+        ]
       }
     }
   },
@@ -83,10 +89,20 @@
               "oneOf": [
                 { "type": "null" },
                 { "type": "object", "required": ["json"], "properties": { "json": {} } },
-                { "type": "object", "required": ["jsonText"], "properties": { "jsonText": { "type": "string", "description": "JSON with unquoted {{variables}} in it, kept as text." } } },
+                {
+                  "type": "object",
+                  "required": ["jsonText"],
+                  "properties": { "jsonText": { "type": "string", "description": "JSON with unquoted {{variables}} in it, kept as text." } }
+                },
                 { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } },
                 { "type": "object", "required": ["form"], "properties": { "form": { "$ref": "#/$defs/stringMap" } } },
-                { "type": "object", "required": ["file"], "properties": { "file": { "type": "string", "description": "Relative to the workspace. Files outside it, and secret or git files, are refused." } } }
+                {
+                  "type": "object",
+                  "required": ["file"],
+                  "properties": {
+                    "file": { "type": "string", "description": "Relative to the workspace. Files outside it, and secret or git files, are refused." }
+                  }
+                }
               ]
             },
             "timeoutMs": { "type": "number", "minimum": 0, "default": 30000 }

@@ -7,7 +7,20 @@ import { create } from "zustand";
 import { api } from "../lib/api";
 import { activeWorkspace, navigate, selectServices, toast, updateActiveWorkspace, useStore } from "../state/store";
 import flowSchema from "./flow-2.schema.json";
-import { allSteps, FLOW_SCHEMA_PATH, mapSteps, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow, slugify, type EnvDoc, type FlowDoc, type FlowStep } from "./model";
+import {
+  allSteps,
+  FLOW_SCHEMA_PATH,
+  mapSteps,
+  newFlow,
+  parseEnv,
+  parseFlow,
+  serializeEnv,
+  serializeFlow,
+  slugify,
+  type EnvDoc,
+  type FlowDoc,
+  type FlowStep,
+} from "./model";
 import type { FlowRunState, StepOutcome } from "./runner";
 import type { VarSources } from "./vars";
 import { flushMap, loadTopology } from "../map/store";
@@ -29,7 +42,17 @@ interface FlowsState {
   extracted: Record<string, Record<string, string>>;
 }
 
-export const useFlows = create<FlowsState>(() => ({ root: null, loaded: false, flows: {}, broken: {}, envs: {}, invalid: {}, responses: {}, runs: {}, extracted: {} }));
+export const useFlows = create<FlowsState>(() => ({
+  root: null,
+  loaded: false,
+  flows: {},
+  broken: {},
+  envs: {},
+  invalid: {},
+  responses: {},
+  runs: {},
+  extracted: {},
+}));
 const set = useFlows.setState;
 const get = useFlows.getState;
 
@@ -161,7 +184,14 @@ async function reload(root: string, external = false) {
   }
   set({ flows, broken, envs, loaded: true });
   void loadTopology(root);
-  if (external && Object.keys(broken).length) toast("error", "A file in .auxin couldn't be read", Object.entries(broken).map(([p, m]) => `${p}: ${m}`).join("\n"));
+  if (external && Object.keys(broken).length)
+    toast(
+      "error",
+      "A file in .auxin couldn't be read",
+      Object.entries(broken)
+        .map(([p, m]) => `${p}: ${m}`)
+        .join("\n"),
+    );
 }
 
 /* ---------- flows ---------- */
@@ -267,7 +297,12 @@ export async function createFlow(name = "New flow") {
 export async function confirmDeleteFlow(path: string) {
   const f = get().flows[path];
   if (!f) return;
-  const ok = await confirm(`Delete the flow “${f.name}”? This removes .auxin/${path}.`, { title: "Delete flow", kind: "warning", okLabel: "Delete", cancelLabel: "Cancel" });
+  const ok = await confirm(`Delete the flow “${f.name}”? This removes .auxin/${path}.`, {
+    title: "Delete flow",
+    kind: "warning",
+    okLabel: "Delete",
+    cancelLabel: "Cancel",
+  });
   if (!ok) return;
   const root = get().root;
   set((s) => {
@@ -296,7 +331,11 @@ export function setActiveEnv(name: string) {
 export async function saveEnv(env: EnvDoc) {
   // Its files on disk couldn't be read (a merge conflict, say): writing would replace them, secrets included.
   if (get().broken[`env/${env.name}.json`]) {
-    toast("error", `Environment “${env.name}” can't be saved`, `.auxin/env/${env.name}.json or its secret file can't be read. Fix the file first, so it isn't overwritten.`);
+    toast(
+      "error",
+      `Environment “${env.name}” can't be saved`,
+      `.auxin/env/${env.name}.json or its secret file can't be read. Fix the file first, so it isn't overwritten.`,
+    );
     return;
   }
   set((s) => ({ envs: { ...s.envs, [env.name]: env } }));

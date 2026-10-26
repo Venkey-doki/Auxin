@@ -8,17 +8,7 @@ import { Ticket } from "./Ticket";
 import { cx } from "./ui";
 
 /** The rail: tickets in a row, each with its log column hanging beneath. */
-export function Board({
-  ids,
-  layout,
-  onRemove,
-  empty,
-}: {
-  ids: string[];
-  layout: GroupLayout;
-  onRemove?: (id: string) => void;
-  empty?: ReactNode;
-}) {
+export function Board({ ids, layout, onRemove, empty }: { ids: string[]; layout: GroupLayout; onRemove?: (id: string) => void; empty?: ReactNode }) {
   const all = useStore(selectServices);
   const services = useMemo(() => ids.map((id) => all.find((s) => s.id === id)).filter((s) => !!s), [ids, all]);
   const [focus, setFocus] = useState<string | null>(null);
@@ -99,7 +89,9 @@ function RailIndex({ ids, scroller }: { ids: string[]; scroller: React.RefObject
         return (
           <button
             key={id}
-            onClick={() => scroller.current?.querySelector(`[data-lane="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" })}
+            onClick={() =>
+              scroller.current?.querySelector(`[data-lane="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" })
+            }
             className={cx(
               "flex h-6 flex-none items-center gap-1.5 rounded px-2 text-sm whitespace-nowrap transition-colors hover:bg-surface-3",
               st === "crashed" ? "bg-bad/10 text-bad-soft" : "text-fg-2",

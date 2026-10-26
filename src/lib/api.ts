@@ -87,7 +87,18 @@ export interface OtelStatus {
 /** What `step_exec` takes: one variant per step kind. */
 export type StepRequest =
   | ({ kind: "http" } & HttpRequest)
-  | { kind: "queue.publish"; id: string; broker: QueueBroker; destination: string; routingKey: string | null; key: string | null; headers: [string, string][]; body: string; timeoutMs?: number; policy?: NetPolicy }
+  | {
+      kind: "queue.publish";
+      id: string;
+      broker: QueueBroker;
+      destination: string;
+      routingKey: string | null;
+      key: string | null;
+      headers: [string, string][];
+      body: string;
+      timeoutMs?: number;
+      policy?: NetPolicy;
+    }
   | { kind: "queue.consume"; id: string; broker: QueueBroker; source: string; binding: string | null; traceIds: string[]; waitMs: number; policy?: NetPolicy };
 
 export type StepResult =

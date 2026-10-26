@@ -118,10 +118,7 @@ impl<R: Runtime> Manager<R> {
         if let Some(err) = child.stderr.take() {
             pipe_lines(err, spec.id.clone(), "stderr", self.log_tx.clone());
         }
-        procs.insert(
-            spec.id.clone(),
-            Running { pid, stdin: child.stdin.take(), stop_requested: stop_requested.clone() },
-        );
+        procs.insert(spec.id.clone(), Running { pid, stdin: child.stdin.take(), stop_requested: stop_requested.clone() });
         drop(procs);
 
         self.emit_status(&spec.id, "running", Some(pid), None);
@@ -190,10 +187,13 @@ impl<R: Runtime> Manager<R> {
     pub fn shutdown_all(&self) {
         let pids: Vec<u32> = {
             let procs = self.procs.lock().unwrap();
-            procs.values().map(|r| {
-                r.stop_requested.store(true, Ordering::SeqCst);
-                r.pid
-            }).collect()
+            procs
+                .values()
+                .map(|r| {
+                    r.stop_requested.store(true, Ordering::SeqCst);
+                    r.pid
+                })
+                .collect()
         };
         if pids.is_empty() {
             return;
@@ -383,7 +383,10 @@ mod tests {
                 venv: None,
             })
             .expect("start");
-        assert!(manager.start(StartSpec { id: "svc".into(), command: "true".into(), cwd: "/".into(), env: vec![], venv: None }).is_err(), "double start must fail");
+        assert!(
+            manager.start(StartSpec { id: "svc".into(), command: "true".into(), cwd: "/".into(), env: vec![], venv: None }).is_err(),
+            "double start must fail"
+        );
 
         thread::sleep(Duration::from_millis(800));
         let got = lines.lock().unwrap().join("\n");
@@ -408,9 +411,7 @@ mod tests {
         let mut pids = vec![];
         for i in 0..3 {
             pids.push(
-                manager
-                    .start(StartSpec { id: format!("s{i}"), command: "sleep 30 & sleep 30".into(), cwd: "/".into(), env: vec![], venv: None })
-                    .unwrap(),
+                manager.start(StartSpec { id: format!("s{i}"), command: "sleep 30 & sleep 30".into(), cwd: "/".into(), env: vec![], venv: None }).unwrap(),
             );
         }
         thread::sleep(Duration::from_millis(300));

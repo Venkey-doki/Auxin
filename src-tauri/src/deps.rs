@@ -29,10 +29,8 @@ pub struct DetectedEdge {
     pub evidence: Vec<String>,
 }
 
-pub(crate) const SKIP_DIRS: &[&str] = &[
-    "node_modules", ".git", "venv", ".venv", "dist", "build", "target", "coverage", "__pycache__", ".next", ".turbo", "out",
-    "vendor",
-];
+pub(crate) const SKIP_DIRS: &[&str] =
+    &["node_modules", ".git", "venv", ".venv", "dist", "build", "target", "coverage", "__pycache__", ".next", ".turbo", "out", "vendor"];
 
 /// Lockfiles are big, noisy, and never describe a runtime dependency.
 const SKIP_FILES: &[&str] = &["package-lock.json", "pnpm-lock.yaml", "composer.lock"];
@@ -144,12 +142,7 @@ pub fn scan_dependencies(root: &Path, services: &[ServiceInfo], include_code: bo
         };
         walk.dir(&svc_root, &svc_root);
         for e in walk.edges {
-            out.push(DetectedEdge {
-                from: svc.alias.clone(),
-                to: services[e.to].alias.clone(),
-                source: e.source.as_str().to_string(),
-                evidence: e.evidence,
-            });
+            out.push(DetectedEdge { from: svc.alias.clone(), to: services[e.to].alias.clone(), source: e.source.as_str().to_string(), evidence: e.evidence });
         }
     }
     out
@@ -429,11 +422,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let services = pair(dir.path());
         // 5000 is not a known port; the service name alone is enough. `image: api:5` is a tag.
-        write(
-            dir.path(),
-            "web/docker-compose.yml",
-            "services:\n  web:\n    image: api:5\n    environment:\n      - BACKEND=http://API:5000/graphql\n",
-        );
+        write(dir.path(), "web/docker-compose.yml", "services:\n  web:\n    image: api:5\n    environment:\n      - BACKEND=http://API:5000/graphql\n");
         let got = scan_dependencies(dir.path(), &services, true);
         assert_eq!(got, vec![edge("web", "api", "env", &["web/docker-compose.yml:5  - BACKEND=http://API:5000/graphql"])]);
     }
@@ -594,10 +583,8 @@ mod real_world {
     #[ignore]
     fn deps_prints() {
         let root = std::env::var("AUXIN_SCAN_ROOT").expect("set AUXIN_SCAN_ROOT");
-        let services: Vec<super::ServiceInfo> = crate::scan::scan(std::path::Path::new(&root))
-            .into_iter()
-            .map(|s| super::ServiceInfo { alias: s.name, path: s.path, port: s.port_hint })
-            .collect();
+        let services: Vec<super::ServiceInfo> =
+            crate::scan::scan(std::path::Path::new(&root)).into_iter().map(|s| super::ServiceInfo { alias: s.name, path: s.path, port: s.port_hint }).collect();
         for e in super::scan_dependencies(std::path::Path::new(&root), &services, true) {
             println!("{} -> {} [{}]\n    {}", e.from, e.to, e.source, e.evidence.join("\n    "));
         }

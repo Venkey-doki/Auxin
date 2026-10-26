@@ -68,7 +68,8 @@ export function flowTrends(records: RunRecord[]): Trend[] {
       ...o,
       points: runs.map((r): TrendPoint => {
         const s = r.steps.find((x) => x.id === o.id);
-        if (!s || s.state === "skipped" || s.state === "cancelled" || s.state === "queued") return { runId: r.runId, at: r.startedAt, ran: false, failed: false };
+        if (!s || s.state === "skipped" || s.state === "cancelled" || s.state === "queued")
+          return { runId: r.runId, at: r.startedAt, ran: false, failed: false };
         return { runId: r.runId, at: r.startedAt, ms: s.ms, ran: true, failed: FAILED.has(s.state) };
       }),
     }),

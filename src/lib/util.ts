@@ -1,16 +1,5 @@
 /** Stable identity colours for services; tags only, never chrome. */
-export const SERVICE_COLORS = [
-  "#7aa2f7",
-  "#e0b46c",
-  "#c49bf2",
-  "#4fc8d8",
-  "#f08a9b",
-  "#9fd36c",
-  "#ff9f6b",
-  "#6fd6bd",
-  "#d9a3e0",
-  "#a9b8d6",
-];
+export const SERVICE_COLORS = ["#7aa2f7", "#e0b46c", "#c49bf2", "#4fc8d8", "#f08a9b", "#9fd36c", "#ff9f6b", "#6fd6bd", "#d9a3e0", "#a9b8d6"];
 
 export function hashColor(id: string): number {
   let h = 0;

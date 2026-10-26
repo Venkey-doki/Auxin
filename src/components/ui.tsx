@@ -15,22 +15,23 @@ const VARIANT: Record<Variant, string> = {
   ghost: "border-transparent bg-transparent text-fg-2 enabled:hover:bg-surface-2 enabled:hover:text-fg",
 };
 
-export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: "sm" | "md" }>(
-  function Button({ variant = "default", size = "md", className, ...rest }, ref) {
-    return (
-      <button
-        ref={ref}
-        className={cx(
-          "inline-flex flex-none items-center gap-1.5 whitespace-nowrap rounded-md border text-sm font-medium transition-colors enabled:active:translate-y-px disabled:opacity-45 [&_svg]:size-3.5 [&_svg]:flex-none",
-          size === "sm" ? "h-6 px-2" : "h-7 px-2.5",
-          VARIANT[variant],
-          className,
-        )}
-        {...rest}
-      />
-    );
-  },
-);
+export const Button = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: "sm" | "md" }>(function Button(
+  { variant = "default", size = "md", className, ...rest },
+  ref,
+) {
+  return (
+    <button
+      ref={ref}
+      className={cx(
+        "inline-flex flex-none items-center gap-1.5 whitespace-nowrap rounded-md border text-sm font-medium transition-colors enabled:active:translate-y-px disabled:opacity-45 [&_svg]:size-3.5 [&_svg]:flex-none",
+        size === "sm" ? "h-6 px-2" : "h-7 px-2.5",
+        VARIANT[variant],
+        className,
+      )}
+      {...rest}
+    />
+  );
+});
 
 export const IconButton = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { size?: "sm" | "md"; label: string; pressed?: boolean }>(
   function IconButton({ size = "md", label, pressed, className, ...rest }, ref) {
@@ -77,22 +78,23 @@ export function SegButton({ active, className, ...rest }: ButtonHTMLAttributes<H
 export const inputClass =
   "h-8 w-full rounded-md border border-line-strong bg-rail px-2.5 text-base text-fg transition-colors placeholder:text-fg-3 hover:border-[#3d4348] focus:border-paper/70 focus:bg-[#0b0d0e] focus:outline-none";
 
-export const MenuItem = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean; active?: boolean }>(
-  function MenuItem({ danger, active, className, ...rest }, ref) {
-    return (
-      <button
-        ref={ref}
-        data-active={active}
-        className={cx(
-          "flex min-h-[30px] w-full items-center gap-2 rounded px-2 py-1 text-left text-base hover:bg-surface-3 data-[active=true]:bg-surface-3 [&_svg]:size-3.5 [&_svg]:flex-none",
-          danger ? "text-bad-soft" : "text-fg [&_svg]:text-fg-2",
-          className,
-        )}
-        {...rest}
-      />
-    );
-  },
-);
+export const MenuItem = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean; active?: boolean }>(function MenuItem(
+  { danger, active, className, ...rest },
+  ref,
+) {
+  return (
+    <button
+      ref={ref}
+      data-active={active}
+      className={cx(
+        "flex min-h-[30px] w-full items-center gap-2 rounded px-2 py-1 text-left text-base hover:bg-surface-3 data-[active=true]:bg-surface-3 [&_svg]:size-3.5 [&_svg]:flex-none",
+        danger ? "text-bad-soft" : "text-fg [&_svg]:text-fg-2",
+        className,
+      )}
+      {...rest}
+    />
+  );
+});
 
 export function MenuLabel({ children }: { children: ReactNode }) {
   return <div className="px-2 pt-1.5 pb-1 text-xs font-semibold tracking-wider text-fg-3 uppercase">{children}</div>;
@@ -127,7 +129,9 @@ export function Switch({ checked, onChange, label }: { checked: boolean; onChang
 
 export function CheckBox({ on }: { on: boolean }) {
   return (
-    <span className={cx("grid size-3.5 flex-none place-items-center rounded-[3px] border", on ? "border-paper bg-paper text-ink" : "border-line-strong bg-rail")}>
+    <span
+      className={cx("grid size-3.5 flex-none place-items-center rounded-[3px] border", on ? "border-paper bg-paper text-ink" : "border-line-strong bg-rail")}
+    >
       {on && <Check className="size-2.5 !text-ink" strokeWidth={3} />}
     </span>
   );

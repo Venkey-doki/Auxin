@@ -61,7 +61,9 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
       ...(edits.urls ? { baseUrls: Object.fromEntries(Object.entries(edits.urls).filter(([, v]) => v.trim())) } : {}),
       ...(edits.insecure !== undefined ? { insecureTls: edits.insecure } : {}),
       ...(edits.network ? { network: edits.network } : {}),
-      ...(edits.brokers ? { brokers: Object.fromEntries(edits.brokers.filter((b) => b.name.trim()).map((b) => [b.name.trim(), { type: b.type, url: b.url }])) } : {}),
+      ...(edits.brokers
+        ? { brokers: Object.fromEntries(edits.brokers.filter((b) => b.name.trim()).map((b) => [b.name.trim(), { type: b.type, url: b.url }])) }
+        : {}),
     };
     lastSaved.current = JSON.stringify(doc);
     void saveEnvIn(root, doc);
@@ -92,7 +94,9 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
     // Our own save coming back from the store: keep the rows as typed (blank rows included).
     if (lastSaved.current === JSON.stringify(env)) return;
     // An outside change (curl import, git pull): refresh sections not being edited.
-    const untouched = new Set<Section>((["vars", "secrets", "urls", "insecure", "network", "brokers"] as Section[]).filter((k) => !(k in pendingEdits.current)));
+    const untouched = new Set<Section>(
+      (["vars", "secrets", "urls", "insecure", "network", "brokers"] as Section[]).filter((k) => !(k in pendingEdits.current)),
+    );
     load(untouched);
   }, [name, env]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -120,7 +124,10 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
               key={n}
               onClick={() => setActiveEnv(n)}
               aria-pressed={n === name}
-              className={cx("h-7 rounded-md border px-2.5 text-sm transition-colors", n === name ? "border-paper bg-paper font-semibold text-ink" : "border-line-strong text-fg-2 hover:bg-surface-3")}
+              className={cx(
+                "h-7 rounded-md border px-2.5 text-sm transition-colors",
+                n === name ? "border-paper bg-paper font-semibold text-ink" : "border-line-strong text-fg-2 hover:bg-surface-3",
+              )}
             >
               {n}
             </button>
@@ -218,8 +225,20 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
               return (
                 <div key={i} className="group grid gap-1.5 rounded-md border border-line p-2">
                   <div className="flex items-center gap-1.5">
-                    <input className={cx(inputClass, "h-7 min-w-0 flex-1 font-mono text-sm")} value={b.name} placeholder="name, e.g. rabbit" onChange={(e) => set({ name: e.target.value })} aria-label="Broker name" spellCheck={false} />
-                    <select className={cx(inputClass.replace("w-full ", ""), "h-7 w-28 flex-none appearance-none text-sm")} value={b.type} onChange={(e) => set({ type: e.target.value as Broker["type"] })} aria-label="Broker type">
+                    <input
+                      className={cx(inputClass, "h-7 min-w-0 flex-1 font-mono text-sm")}
+                      value={b.name}
+                      placeholder="name, e.g. rabbit"
+                      onChange={(e) => set({ name: e.target.value })}
+                      aria-label="Broker name"
+                      spellCheck={false}
+                    />
+                    <select
+                      className={cx(inputClass.replace("w-full ", ""), "h-7 w-28 flex-none appearance-none text-sm")}
+                      value={b.type}
+                      onChange={(e) => set({ type: e.target.value as Broker["type"] })}
+                      aria-label="Broker type"
+                    >
                       <option value="rabbitmq">RabbitMQ</option>
                       <option value="kafka">Kafka</option>
                     </select>
@@ -258,7 +277,9 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
             >
               <Plus /> Add broker
             </Button>
-            <span className="text-xs text-fg-3">Put passwords in a secret and write {"{{name}}"} in the address. The network rules below apply to brokers too.</span>
+            <span className="text-xs text-fg-3">
+              Put passwords in a secret and write {"{{name}}"} in the address. The network rules below apply to brokers too.
+            </span>
           </div>
         </Section>
 
@@ -288,7 +309,8 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
             />
           </label>
           <span className="text-xs text-fg-3">
-            One per line; leave empty to allow any public host. Cloud metadata addresses like 169.254.169.254 are always blocked, and every redirect is checked too.
+            One per line; leave empty to allow any public host. Cloud metadata addresses like 169.254.169.254 are always blocked, and every redirect is checked
+            too.
           </span>
         </Section>
 

@@ -47,7 +47,12 @@ export function Popover({
 
   if (!open || !pos) return null;
   return createPortal(
-    <div ref={ref} className="fixed z-50 max-h-[60vh] min-w-60 overflow-auto rounded-lg border border-line-strong bg-pop p-1 shadow-[0_12px_32px_rgb(0_0_0/0.5),0_2px_6px_rgb(0_0_0/0.3)] animate-pop" role="menu" style={{ top: pos.top, left: pos.left, width }}>
+    <div
+      ref={ref}
+      className="fixed z-50 max-h-[60vh] min-w-60 overflow-auto rounded-lg border border-line-strong bg-pop p-1 shadow-[0_12px_32px_rgb(0_0_0/0.5),0_2px_6px_rgb(0_0_0/0.3)] animate-pop"
+      role="menu"
+      style={{ top: pos.top, left: pos.left, width }}
+    >
       {children}
     </div>,
     document.body,

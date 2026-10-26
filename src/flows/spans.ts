@@ -86,7 +86,21 @@ export function spanLinks(spans: Span[]): [string, string][] {
 }
 
 /** A few attributes worth showing next to a span's name, in this order. */
-const KEY_ATTRS = ["http.request.method", "http.method", "http.route", "url.path", "http.target", "http.response.status_code", "http.status_code", "db.system", "db.operation.name", "db.operation", "messaging.system", "messaging.destination.name", "messaging.operation"];
+const KEY_ATTRS = [
+  "http.request.method",
+  "http.method",
+  "http.route",
+  "url.path",
+  "http.target",
+  "http.response.status_code",
+  "http.status_code",
+  "db.system",
+  "db.operation.name",
+  "db.operation",
+  "messaging.system",
+  "messaging.destination.name",
+  "messaging.operation",
+];
 
 export function spanSummary(s: Span): string {
   const a = new Map(s.attributes);

@@ -1,5 +1,22 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { Check, ChevronsUpDown, Eye, PanelLeftClose, FolderOpen, FolderPlus, LayoutPanelLeft, Network, Play, Plus, RefreshCw, Rows3, Search, Square, Trash2, Workflow } from "lucide-react";
+import {
+  Check,
+  ChevronsUpDown,
+  Eye,
+  PanelLeftClose,
+  FolderOpen,
+  FolderPlus,
+  LayoutPanelLeft,
+  Network,
+  Play,
+  Plus,
+  RefreshCw,
+  Rows3,
+  Search,
+  Square,
+  Trash2,
+  Workflow,
+} from "lucide-react";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import type { Service } from "../lib/types";
 import { MOD, SERVICE_COLORS, shortPath } from "../lib/util";
@@ -99,7 +116,19 @@ export function Sidebar() {
             {flows.map((f) => (
               <div key={f.path} className={cx(rowBase, view.type === "flow" && view.id === f.path && rowActive)}>
                 <button className={mainBtn} onClick={() => navigate({ type: "flow", id: f.path })} title={`.auxin/${f.path}`}>
-                  <Workflow className={cx("size-4 flex-none", flowRuns[f.path]?.status === "running" ? "text-warm" : flowRuns[f.path]?.status === "failed" ? "text-bad" : flowRuns[f.path]?.status === "passed" ? "text-ok" : "text-fg-3")} aria-hidden />
+                  <Workflow
+                    className={cx(
+                      "size-4 flex-none",
+                      flowRuns[f.path]?.status === "running"
+                        ? "text-warm"
+                        : flowRuns[f.path]?.status === "failed"
+                          ? "text-bad"
+                          : flowRuns[f.path]?.status === "passed"
+                            ? "text-ok"
+                            : "text-fg-3",
+                    )}
+                    aria-hidden
+                  />
                   <span className="flex-1 truncate font-medium">{f.name}</span>
                   <span className="pr-1.5 font-mono text-sm text-fg-3 tabular-nums group-hover:hidden">{allSteps(f.steps).length}</span>
                 </button>
@@ -214,7 +243,11 @@ function ServiceRow({ service: s, now, active }: { service: Service; now: number
   const line = live ? rt?.lastLine : rt?.status === "crashed" ? (rt.error ?? rt.lastLine) : undefined;
   return (
     <div className={cx(rowBase, active && rowActive)}>
-      <button className={cx(mainBtn, "items-start py-1.5")} onClick={() => navigate({ type: "service", id: s.id })} title={`${s.name} — ${STATUS_LABEL[shown]}`}>
+      <button
+        className={cx(mainBtn, "items-start py-1.5")}
+        onClick={() => navigate({ type: "service", id: s.id })}
+        title={`${s.name} — ${STATUS_LABEL[shown]}`}
+      >
         <StatusMark status={shown} className={cx("mt-[4px]", STATUS_TEXT[shown])} />
         <span aria-hidden className="mt-[3px] h-3 w-[3px] flex-none rounded-full" style={{ background: SERVICE_COLORS[s.color] }} />
         <span className="grid min-w-0 flex-1">
@@ -305,7 +338,11 @@ function HiddenServices() {
   if (!hidden.length) return null;
   return (
     <>
-      <button ref={ref} onClick={() => setOpen((v) => !v)} className="mt-1 w-full rounded-md px-2 py-1 text-left text-sm text-fg-3 hover:bg-surface-2 hover:text-fg-2">
+      <button
+        ref={ref}
+        onClick={() => setOpen((v) => !v)}
+        className="mt-1 w-full rounded-md px-2 py-1 text-left text-sm text-fg-3 hover:bg-surface-2 hover:text-fg-2"
+      >
         {hidden.length} hidden
       </button>
       <Popover anchor={ref} open={isOpen} onClose={() => setOpen(false)} width={260}>

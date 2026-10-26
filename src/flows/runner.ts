@@ -6,7 +6,19 @@
 import { api, type HttpResponse, type QueueMessage, type Span } from "../lib/api";
 import { getLogs } from "../state/logs";
 import { selectServices, serviceForSpan, toast, useStore } from "../state/store";
-import { mask, prepareQueue, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, runQueueStep, validateFlow, type Issue, type QueueStepResult } from "./engine";
+import {
+  mask,
+  prepareQueue,
+  prepareRequest,
+  redactBody,
+  redactHeaders,
+  runHttpStep,
+  runItems,
+  runQueueStep,
+  validateFlow,
+  type Issue,
+  type QueueStepResult,
+} from "./engine";
 import type { CheckResult } from "./eval";
 import { serviceKey } from "../map/model";
 import { recordObserved } from "../map/store";
@@ -121,7 +133,16 @@ async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<
     headers: req.headers.map(([k, v]): [string, string] => [k, mask(v, req.usedSecrets, src)]),
     body: req.body.kind === "file" ? undefined : mask(req.bodyText, req.usedSecrets, src),
   };
-  const base: StepOutcome = { state: "sending", reqId, sentAt: Date.now(), ...shown, checks: [], extracted: [], requestId: req.requestId, traceId: req.traceId };
+  const base: StepOutcome = {
+    state: "sending",
+    reqId,
+    sentAt: Date.now(),
+    ...shown,
+    checks: [],
+    extracted: [],
+    requestId: req.requestId,
+    traceId: req.traceId,
+  };
 
   if (req.missing.length) {
     const missing = req.missing;
@@ -150,7 +171,13 @@ async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<
       cancelled: ctx.cancelled,
       sleep,
       onPoll: ({ tries, res }) => patchOutcome(ctx.root, key, reqId, res ? { res, tries } : { state: "polling", tries }),
-      onRetry: ({ attempt, of, last }) => patchOutcome(ctx.root, key, reqId, { state: "sending", retrying: { attempt, of }, res: last.res, error: last.error ? mask(last.error, req.usedSecrets, src) : undefined }),
+      onRetry: ({ attempt, of, last }) =>
+        patchOutcome(ctx.root, key, reqId, {
+          state: "sending",
+          retrying: { attempt, of },
+          res: last.res,
+          error: last.error ? mask(last.error, req.usedSecrets, src) : undefined,
+        }),
       onInflight: ctx.onInflight,
     },
   );
@@ -163,7 +190,16 @@ async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<
   if (o.state !== "cancelled" && (o.res || o.state === "error")) o.tracing = !!o.res;
   setOutcome(ctx.root, key, o);
   // Only secrets this request used, and long enough to be distinctive.
-  if (o.res) scheduleTrace(ctx.root, doc, step, o, req.bodyText, req.usedSecrets.map((n) => src.secrets[n]).filter((v) => v && v.length >= 4), ctx.env);
+  if (o.res)
+    scheduleTrace(
+      ctx.root,
+      doc,
+      step,
+      o,
+      req.bodyText,
+      req.usedSecrets.map((n) => src.secrets[n]).filter((v) => v && v.length >= 4),
+      ctx.env,
+    );
   return o;
 }
 
@@ -191,7 +227,12 @@ async function executeQueue(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Pro
     traceId: prep.traceId,
   };
   if (prep.missing.length) {
-    const o: StepOutcome = { ...base, state: "error", finishedAt: Date.now(), error: `Not sent: ${prep.missing.map((m) => `{{${m}}}`).join(", ")} has no value yet.` };
+    const o: StepOutcome = {
+      ...base,
+      state: "error",
+      finishedAt: Date.now(),
+      error: `Not sent: ${prep.missing.map((m) => `{{${m}}}`).join(", ")} has no value yet.`,
+    };
     setOutcome(ctx.root, key, o);
     return o;
   }
@@ -292,15 +333,23 @@ function scheduleTrace(root: string, doc: FlowDoc, step: FlowStep, o: StepOutcom
       services: tsvcs,
       linesByService,
       // Secrets never become match values (they'd show in "Matched by").
-      values: correlationValues({ url: o.url, requestBody, responseBody: o.res?.bodyText, extracted: o.extracted.map((e) => e.value).filter((v) => isCorrelationValue(v, new Set(ports))), ports }).filter(
-        (v) => !secretValues.some((sv) => sv && (v.includes(sv) || sv.includes(v))),
-      ),
+      values: correlationValues({
+        url: o.url,
+        requestBody,
+        responseBody: o.res?.bodyText,
+        extracted: o.extracted.map((e) => e.value).filter((v) => isCorrelationValue(v, new Set(ports))),
+        ports,
+      }).filter((v) => !secretValues.some((sv) => sv && (v.includes(sv) || sv.includes(v)))),
     });
     // Spans, when the services send them, replace the log hops with measured ones.
     const spans = await fetchSpans(o);
     if (get().root !== root) return patchOutcome(root, rk(doc.path, step.id), o.reqId, { tracing: false, trace });
     const hops = spans.length ? spanHops(spans, (name) => flowServiceNamed(doc, name)) : [];
-    patchOutcome(root, rk(doc.path, step.id), o.reqId, { tracing: false, trace: hops.length ? { ...trace, hops, source: "otel" } : trace, ...(spans.length ? { spans } : {}) });
+    patchOutcome(root, rk(doc.path, step.id), o.reqId, {
+      tracing: false,
+      trace: hops.length ? { ...trace, hops, source: "otel" } : trace,
+      ...(spans.length ? { spans } : {}),
+    });
     observe(root, doc, trace.traffic, "traffic", (from, to) => `Request ${o.requestId} was logged by ${from}, then by ${to}`);
     observeSpans(root, spans, o.requestId);
   })();
@@ -332,7 +381,9 @@ function observeSpans(root: string, spans: Span[], requestId?: string) {
   };
   recordObserved(
     root,
-    spanLinks(spans).flatMap(([a, b]) => (key(a) && key(b) ? [{ from: key(a)!, to: key(b)!, source: "otel" as const, detail: `${a} called ${b} in the spans of ${requestId ?? "a request"}` }] : [])),
+    spanLinks(spans).flatMap(([a, b]) =>
+      key(a) && key(b) ? [{ from: key(a)!, to: key(b)!, source: "otel" as const, detail: `${a} called ${b} in the spans of ${requestId ?? "a request"}` }] : [],
+    ),
   );
 }
 
@@ -345,7 +396,10 @@ function scheduleSpans(root: string, doc: FlowDoc, step: FlowStep, o: StepOutcom
     const spans = await fetchSpans(o);
     if (!spans.length || get().root !== root) return;
     const hops = spanHops(spans, (name) => flowServiceNamed(doc, name));
-    patchOutcome(root, rk(doc.path, step.id), o.reqId, { spans, trace: { lines: [], nearby: [], hops, matchedBy: [], unavailable: [], traffic: [], source: "otel" } });
+    patchOutcome(root, rk(doc.path, step.id), o.reqId, {
+      spans,
+      trace: { lines: [], nearby: [], hops, matchedBy: [], unavailable: [], traffic: [], source: "otel" },
+    });
     observeSpans(root, spans, o.requestId);
   })();
   pendingTraces.set(o.reqId, p);
@@ -355,7 +409,10 @@ function scheduleSpans(root: string, doc: FlowDoc, step: FlowStep, o: StepOutcom
 /** Hands links a run showed (by alias) to the project map (by service folder). */
 function observe(root: string, doc: FlowDoc, pairs: [string, string][], source: "traffic" | "connection", detail: (from: string, to: string) => string) {
   const ref = (alias: string) => doc.services.find((f) => f.alias === alias)?.ref;
-  recordObserved(root, pairs.flatMap(([a, b]) => (ref(a) && ref(b) ? [{ from: ref(a)!, to: ref(b)!, source, detail: detail(a, b) }] : [])));
+  recordObserved(
+    root,
+    pairs.flatMap(([a, b]) => (ref(a) && ref(b) ? [{ from: ref(a)!, to: ref(b)!, source, detail: detail(a, b) }] : [])),
+  );
 }
 
 /* ---------- single send ---------- */
@@ -392,7 +449,10 @@ export async function sendStep(path: string, step: FlowStep) {
   });
   cancelledSteps.delete(key);
   // Values from a single send feed later sends, so steps can be tried one by one.
-  if (o.extracted.length) updateSlice(root, (s) => ({ extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...Object.fromEntries(o.extracted.map((e) => [e.key, e.value])) } } }));
+  if (o.extracted.length)
+    updateSlice(root, (s) => ({
+      extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...Object.fromEntries(o.extracted.map((e) => [e.key, e.value])) } },
+    }));
 }
 
 const cancelledSteps = new Set<string>();
@@ -449,7 +509,15 @@ export async function runFlow(path: string, opts: { replay?: RunRecord; env?: st
   });
   updateSlice(root, (s) => ({
     runs: { ...s.runs, [path]: { runId, status: "running", startedAt, env, branches: {}, replayOf: replay?.runId } },
-    responses: { ...s.responses, ...Object.fromEntries(steps.map((st) => [rk(path, st.id), { state: "queued", reqId: `${runId}-q`, sentAt: startedAt, method: st.method, url: st.url, headers: [], checks: [], extracted: [] } as StepOutcome])) },
+    responses: {
+      ...s.responses,
+      ...Object.fromEntries(
+        steps.map((st) => [
+          rk(path, st.id),
+          { state: "queued", reqId: `${runId}-q`, sentAt: startedAt, method: st.method, url: st.url, headers: [], checks: [], extracted: [] } as StepOutcome,
+        ]),
+      ),
+    },
   }));
 
   const stopSampler = startConnectionSampler(path, root);
@@ -501,7 +569,10 @@ export async function runFlow(path: string, opts: { replay?: RunRecord; env?: st
   void api.httpDropJar(jar).catch(() => undefined);
 
   const finishedAt = Date.now();
-  updateSlice(root, (s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], status, branches, finishedAt } }, extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...extra } } }));
+  updateSlice(root, (s) => ({
+    runs: { ...s.runs, [path]: { ...s.runs[path], status, branches, finishedAt } },
+    extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...extra } },
+  }));
 
   // History includes each step's trace summary, so wait for the traces; then
   // use this run's own outcomes (a send made meanwhile must not leak in).
@@ -511,7 +582,19 @@ export async function runFlow(path: string, opts: { replay?: RunRecord; env?: st
     const latest = sliceOf(root)?.responses[rk(path, st.id)];
     return o && latest?.reqId === o.reqId ? latest : o;
   });
-  await saveHistory(root, path, { ...doc, steps: mapSteps(doc.steps, (s) => sentAs.get(s.id) ?? s) }, runId, env, startedAt, finishedAt, status, final, branches, replay?.runId);
+  await saveHistory(
+    root,
+    path,
+    { ...doc, steps: mapSteps(doc.steps, (s) => sentAs.get(s.id) ?? s) },
+    runId,
+    env,
+    startedAt,
+    finishedAt,
+    status,
+    final,
+    branches,
+    replay?.runId,
+  );
   updateSlice(root, (s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], historySavedAt: Date.now() } } }));
 }
 
@@ -527,7 +610,16 @@ async function openSubscriptions(doc: FlowDoc, runId: string, envName: string): 
         if (!prep.broker || prep.missing.length) return;
         const id = `${runId}:${s.id}`;
         try {
-          await api.stepExec({ kind: "queue.consume", id, broker: prep.broker, source: prep.destination, binding: prep.routingKey || null, traceIds: [], waitMs: 0, policy: { ...(env?.network ?? DEFAULT_NETWORK), env: envName } });
+          await api.stepExec({
+            kind: "queue.consume",
+            id,
+            broker: prep.broker,
+            source: prep.destination,
+            binding: prep.routingKey || null,
+            traceIds: [],
+            waitMs: 0,
+            policy: { ...(env?.network ?? DEFAULT_NETWORK), env: envName },
+          });
           subs.set(s.id, id);
         } catch {
           /* the step will try again and report the problem */
@@ -597,7 +689,19 @@ const runsDir = (path: string) => `runs/${slugify(path.replace(/^flows\//, "").r
  * `outcomes` follows `allSteps(doc.steps)`. Bodies are kept redacted: secret
  * values and token-like JSON fields are hidden, and each body is capped.
  */
-async function saveHistory(root: string, path: string, doc: FlowDoc, runId: string, env: string, startedAt: number, finishedAt: number, status: FlowRunState["status"], outcomes: (StepOutcome | undefined)[], branches: Record<string, "then" | "else">, replayOf?: string) {
+async function saveHistory(
+  root: string,
+  path: string,
+  doc: FlowDoc,
+  runId: string,
+  env: string,
+  startedAt: number,
+  finishedAt: number,
+  status: FlowRunState["status"],
+  outcomes: (StepOutcome | undefined)[],
+  branches: Record<string, "then" | "else">,
+  replayOf?: string,
+) {
   const secrets = Object.values(sliceOf(root)?.envs[env]?.secrets ?? {});
   const rec: RunRecord = {
     version: 2,
@@ -631,9 +735,27 @@ async function saveHistory(root: string, path: string, doc: FlowDoc, runId: stri
         // Names only: values can be tokens returned by a login call.
         extracted: (o?.extracted ?? []).map((e) => e.key),
         hops: (o?.trace?.hops ?? []).map((h) => ({ alias: h.alias, ms: h.ms, ok: h.ok })),
-        ...(o && o.state !== "queued" && o.state !== "skipped" && o.state !== "cancelled" ? { request: { headers: redactHeaders(o.headers, secrets), ...(reqBody ? { body: reqBody.body, truncated: reqBody.truncated } : {}) } } : {}),
-        ...(o?.res ? { response: { status: o.res.status, headers: redactHeaders(o.res.headers, secrets), ...(resBody ? { body: resBody.body, truncated: resBody.truncated || o.res.truncated } : {}) } } : {}),
-        ...(o?.message ? { response: { status: 0, headers: redactHeaders(o.message.headers, secrets), ...(resBody ? { body: resBody.body, truncated: resBody.truncated } : {}) } } : {}),
+        ...(o && o.state !== "queued" && o.state !== "skipped" && o.state !== "cancelled"
+          ? { request: { headers: redactHeaders(o.headers, secrets), ...(reqBody ? { body: reqBody.body, truncated: reqBody.truncated } : {}) } }
+          : {}),
+        ...(o?.res
+          ? {
+              response: {
+                status: o.res.status,
+                headers: redactHeaders(o.res.headers, secrets),
+                ...(resBody ? { body: resBody.body, truncated: resBody.truncated || o.res.truncated } : {}),
+              },
+            }
+          : {}),
+        ...(o?.message
+          ? {
+              response: {
+                status: 0,
+                headers: redactHeaders(o.message.headers, secrets),
+                ...(resBody ? { body: resBody.body, truncated: resBody.truncated } : {}),
+              },
+            }
+          : {}),
       };
     }),
   };
@@ -652,8 +774,18 @@ export async function loadHistory(path: string): Promise<RunRecord[]> {
   if (!root) return [];
   const dir = runsDir(path);
   try {
-    const names = (await api.auxinListDir(root, dir)).filter((n) => n.endsWith(".json")).sort().reverse();
-    const recs = await Promise.all(names.map((n) => api.auxinRead(root, `${dir}/${n}`).then((t) => JSON.parse(t) as RunRecord).catch(() => null)));
+    const names = (await api.auxinListDir(root, dir))
+      .filter((n) => n.endsWith(".json"))
+      .sort()
+      .reverse();
+    const recs = await Promise.all(
+      names.map((n) =>
+        api
+          .auxinRead(root, `${dir}/${n}`)
+          .then((t) => JSON.parse(t) as RunRecord)
+          .catch(() => null),
+      ),
+    );
     return recs.filter((r): r is RunRecord => !!r);
   } catch {
     return [];

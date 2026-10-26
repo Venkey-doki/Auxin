@@ -170,10 +170,18 @@ export function LogView({ ids, tagged = false, compact = false, inputFor, empty 
         </IconButton>
       </div>
 
-      <div ref={scrollRef} onScroll={onScroll} onWheel={onWheel} onKeyDown={onKeyDown} onPointerDown={onPointerDown} tabIndex={0} className="min-h-0 flex-1 overflow-auto py-1.5 font-mono text-sm leading-[18px] select-text">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        onWheel={onWheel}
+        onKeyDown={onKeyDown}
+        onPointerDown={onPointerDown}
+        tabIndex={0}
+        className="min-h-0 flex-1 overflow-auto py-1.5 font-mono text-sm leading-[18px] select-text"
+      >
         {rows.length === 0 ? (
           <div className="grid h-full place-items-center px-6 text-center font-sans text-base text-fg-3 select-none">
-            {all.length ? "No lines match this filter." : empty ?? "No output yet."}
+            {all.length ? "No lines match this filter." : (empty ?? "No output yet.")}
           </div>
         ) : (
           <div className="relative min-w-full" style={{ height: virt.getTotalSize() }}>

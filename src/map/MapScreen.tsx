@@ -4,7 +4,23 @@
  * Edits here are shared through `.auxin/topology.json`; flows draw their own
  * maps from the same links.
  */
-import { ArrowRight, Code2, Database, Globe, Inbox, LayoutGrid, Monitor, Plus, Radar, RotateCcw, Server, Trash2, TriangleAlert, Zap, type LucideIcon } from "lucide-react";
+import {
+  ArrowRight,
+  Code2,
+  Database,
+  Globe,
+  Inbox,
+  LayoutGrid,
+  Monitor,
+  Plus,
+  Radar,
+  RotateCcw,
+  Server,
+  Trash2,
+  TriangleAlert,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Popover } from "../components/Popover";
 import { Button, cx, IconButton, inputClass, MenuLabel, Switch, TopBar } from "../components/ui";
@@ -16,7 +32,14 @@ import { autoLayout, GraphCanvas, type GraphNode } from "./GraphCanvas";
 import { addNode, edgeKey, keepEdge, kindTo, removeEdge, removeNode, type MapNode, type NodeKind } from "./model";
 import { codeScanAllowed, discover, editTopology, setCodeScan, useMap, useTopology } from "./store";
 
-const KIND_LABEL: Record<NodeKind, string> = { service: "Service", frontend: "Frontend", database: "Database", cache: "Cache", queue: "Queue", external: "Outside API" };
+const KIND_LABEL: Record<NodeKind, string> = {
+  service: "Service",
+  frontend: "Frontend",
+  database: "Database",
+  cache: "Cache",
+  queue: "Queue",
+  external: "Outside API",
+};
 const KIND_ICON: Record<NodeKind, LucideIcon> = { service: Server, frontend: Monitor, database: Database, cache: Zap, queue: Inbox, external: Globe };
 const isInfra = (n: MapNode) => n.kind !== "service" && n.kind !== "frontend";
 
@@ -38,7 +61,9 @@ export function MapScreen() {
         return {
           id: n.key,
           label: n.label,
-          sub: n.service ? `${port ? `:${port}` : "port unknown"}${n.service.framework ? ` · ${n.service.framework}` : ""}` : [n.tech, n.endpoint].filter(Boolean).join(" · ") || KIND_LABEL[n.kind].toLowerCase(),
+          sub: n.service
+            ? `${port ? `:${port}` : "port unknown"}${n.service.framework ? ` · ${n.service.framework}` : ""}`
+            : [n.tech, n.endpoint].filter(Boolean).join(" · ") || KIND_LABEL[n.kind].toLowerCase(),
           kind: n.kind,
           lang: n.service?.kind,
           color: n.service?.color,
@@ -88,8 +113,8 @@ export function MapScreen() {
         <div className="flex flex-none items-center gap-2 border-b border-bad/35 bg-bad/[0.07] px-5 py-2 text-sm" role="alert">
           <TriangleAlert className="size-4 flex-none text-bad-soft" aria-hidden />
           <span className="min-w-0 text-fg-2">
-            <span className="font-semibold text-bad-soft">.auxin/topology.json can't be read</span> ({broken}). Often a merge conflict. Your edits aren't saved until it's fixed, so
-            the file isn't overwritten.
+            <span className="font-semibold text-bad-soft">.auxin/topology.json can't be read</span> ({broken}). Often a merge conflict. Your edits aren't saved
+            until it's fixed, so the file isn't overwritten.
           </span>
         </div>
       )}
@@ -117,7 +142,9 @@ export function MapScreen() {
             empty={
               <div className="max-w-[440px] text-center">
                 <p className="font-semibold text-fg">{discovering ? "Scanning the project…" : "Nothing on the map yet"}</p>
-                <p className="mt-1 text-sm text-fg-3">Services appear once the workspace has them. Databases, caches and queues come from docker-compose, .env, Kubernetes and config files.</p>
+                <p className="mt-1 text-sm text-fg-3">
+                  Services appear once the workspace has them. Databases, caches and queues come from docker-compose, .env, Kubernetes and config files.
+                </p>
               </div>
             }
           />
@@ -129,7 +156,9 @@ export function MapScreen() {
               <span className="text-xs font-semibold tracking-wider text-fg-3 uppercase">Infrastructure</span>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {!infra.length && <p className="p-4 text-sm text-fg-3">None found. Add a database, queue or outside API with “Node”, or describe it in docker-compose or .env.</p>}
+              {!infra.length && (
+                <p className="p-4 text-sm text-fg-3">None found. Add a database, queue or outside API with “Node”, or describe it in docker-compose or .env.</p>
+              )}
               {infra.map((n) => {
                 const Icon = KIND_ICON[n.kind];
                 const links = edges.filter((e) => e.from === n.key || e.to === n.key);
@@ -138,7 +167,12 @@ export function MapScreen() {
                     <div className="flex min-w-0 items-center gap-2">
                       <Icon className="size-4 flex-none text-fg-2" aria-hidden />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium">{n.label}</span>
-                      <IconButton size="sm" label={`Remove ${n.label} from the map`} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100" onClick={() => editTopology((t) => removeNode(t, n.key))}>
+                      <IconButton
+                        size="sm"
+                        label={`Remove ${n.label} from the map`}
+                        className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        onClick={() => editTopology((t) => removeNode(t, n.key))}
+                      >
                         <Trash2 />
                       </IconButton>
                     </div>
@@ -155,7 +189,9 @@ export function MapScreen() {
                   <span className="text-xs font-semibold tracking-wider text-fg-3 uppercase">Removed by you</span>
                   {removed.map((k) => (
                     <div key={k} className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-3">{k.includes("→") ? k.split("→").map(label).join(" → ") : label(k)}</span>
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-3">
+                        {k.includes("→") ? k.split("→").map(label).join(" → ") : label(k)}
+                      </span>
                       <IconButton size="sm" label="Bring back" onClick={() => editTopology((t) => ({ ...t, removed: t.removed.filter((r) => r !== k) }))}>
                         <RotateCcw />
                       </IconButton>
@@ -209,8 +245,8 @@ function CodeScanToggle() {
             <Switch checked={on} onChange={() => setCodeScan(!on)} label="Read source code" />
           </div>
           <p className="text-xs text-fg-3">
-            Auxin always reads docker-compose, .env, Kubernetes and config files. With this on, it also reads each service's source files for addresses of other services. Nothing leaves your machine, and the choice
-            is saved on this machine only, not in the project.
+            Auxin always reads docker-compose, .env, Kubernetes and config files. With this on, it also reads each service's source files for addresses of other
+            services. Nothing leaves your machine, and the choice is saved on this machine only, not in the project.
           </p>
         </div>
       </Popover>
@@ -254,15 +290,32 @@ function MapToolbar({ nodes }: { nodes: MapNode[] }) {
             setMenu(null);
           }}
         >
-          <select className={cx(inputClass, "h-8 appearance-none text-sm")} value={kind} onChange={(e) => setKind(e.target.value as NodeKind)} aria-label="Kind">
+          <select
+            className={cx(inputClass, "h-8 appearance-none text-sm")}
+            value={kind}
+            onChange={(e) => setKind(e.target.value as NodeKind)}
+            aria-label="Kind"
+          >
             {(["external", "database", "cache", "queue", "service"] as NodeKind[]).map((k) => (
               <option key={k} value={k}>
                 {KIND_LABEL[k]}
               </option>
             ))}
           </select>
-          <input className={cx(inputClass, "text-sm")} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. Stripe" aria-label="Name" />
-          <input className={cx(inputClass, "font-mono text-sm")} value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="api.stripe.com (optional)" aria-label="Endpoint" />
+          <input
+            className={cx(inputClass, "text-sm")}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name, e.g. Stripe"
+            aria-label="Name"
+          />
+          <input
+            className={cx(inputClass, "font-mono text-sm")}
+            value={endpoint}
+            onChange={(e) => setEndpoint(e.target.value)}
+            placeholder="api.stripe.com (optional)"
+            aria-label="Endpoint"
+          />
           {taken && <span className="text-xs text-warm">Something on the map already has this name.</span>}
           <Button type="submit" variant="primary" disabled={!key || taken}>
             <Plus /> Add node

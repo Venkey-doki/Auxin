@@ -10,10 +10,14 @@ http
   .createServer(async (_req, res) => {
     await fetch(`${worker}/work`);
     const message = {};
-    tracer.startActiveSpan("orders publish", { kind: SpanKind.PRODUCER, attributes: { "messaging.system": "rabbitmq", "messaging.destination.name": "orders" } }, (span) => {
-      propagation.inject(context.active(), message);
-      span.end();
-    });
+    tracer.startActiveSpan(
+      "orders publish",
+      { kind: SpanKind.PRODUCER, attributes: { "messaging.system": "rabbitmq", "messaging.destination.name": "orders" } },
+      (span) => {
+        propagation.inject(context.active(), message);
+        span.end();
+      },
+    );
     await fetch(`${worker}/message`, { method: "POST", body: JSON.stringify(message) });
     res.end("ok");
   })

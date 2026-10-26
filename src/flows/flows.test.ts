@@ -58,7 +58,11 @@ describe("templatize", () => {
 });
 
 describe("variables", () => {
-  const src: VarSources = { secrets: { token: "s3cret" }, vars: { region: "eu-west", token: "not-this" }, serviceUrls: { "api-gateway": "http://localhost:4000" } };
+  const src: VarSources = {
+    secrets: { token: "s3cret" },
+    vars: { region: "eu-west", token: "not-this" },
+    serviceUrls: { "api-gateway": "http://localhost:4000" },
+  };
 
   it("resolves by precedence and reports what's missing", () => {
     const r = resolve("{{api-gateway}}/jobs/{{region}}?t={{token}}&id={{jobId}}", src);
@@ -82,7 +86,15 @@ describe("flow files", () => {
       directions: [],
       trace: { injectHeaders: false, graceMs: 900 },
       steps: [
-        { id: "a", name: "Submit", method: "post", url: "{{gw}}/jobs", headers: { "Content-Type": "application/json" }, body: { json: { n: 1 } }, extract: { jobId: "body.jobId" } },
+        {
+          id: "a",
+          name: "Submit",
+          method: "post",
+          url: "{{gw}}/jobs",
+          headers: { "Content-Type": "application/json" },
+          body: { json: { n: 1 } },
+          extract: { jobId: "body.jobId" },
+        },
         { id: "b", name: "File", method: "POST", url: "{{gw}}/x", body: { file: "payloads/a.json" } },
       ],
     });
@@ -124,7 +136,10 @@ describe("flow files", () => {
     const back = parseFlow("flows/j.flow.json", serializeFlow(f).text);
     expect(back.steps.filter(isStep)[0].body).toMatchObject({ kind: "json", text: "" });
     expect(back.steps.filter(isStep)[1].body.text).toBe('{"id": 1234567890123456789}');
-    const mixed = { ...f, steps: [{ ...blankStep(1), id: "m", body: { kind: "json" as const, text: '{"ref":"1111111111111111","id":12345678901234567890}', form: [], file: "" } }] };
+    const mixed = {
+      ...f,
+      steps: [{ ...blankStep(1), id: "m", body: { kind: "json" as const, text: '{"ref":"1111111111111111","id":12345678901234567890}', form: [], file: "" } }],
+    };
     expect(parseFlow("flows/j.flow.json", serializeFlow(mixed).text).steps.filter(isStep)[0].body.text).toContain("12345678901234567890");
     // Long digits inside a string are safe, so it's stored as parsed JSON.
     expect(JSON.parse(serializeFlow(f).text).steps[2].http.body).toEqual({ json: { small: 42, name: "1234567890123456789" } });
@@ -134,7 +149,19 @@ describe("flow files", () => {
     const v1 = JSON.stringify({
       version: 1,
       name: "Old",
-      steps: [{ id: "a", name: "Wait", method: "get", url: "{{gw}}/jobs", headers: { Accept: "*/*" }, body: { text: "hi" }, timeoutMs: 5000, poll: { until: { left: "body.done", op: "==", right: true }, everyMs: 200, maxTries: 3 }, note: "kept" }],
+      steps: [
+        {
+          id: "a",
+          name: "Wait",
+          method: "get",
+          url: "{{gw}}/jobs",
+          headers: { Accept: "*/*" },
+          body: { text: "hi" },
+          timeoutMs: 5000,
+          poll: { until: { left: "body.done", op: "==", right: true }, everyMs: 200, maxTries: 3 },
+          note: "kept",
+        },
+      ],
     });
     const out = JSON.parse(serializeFlow(parseFlow("flows/old.flow.json", v1)).text);
     expect(out.version).toBe(2);
@@ -164,15 +191,41 @@ describe("flow files", () => {
     const pub = blankQueueStep("queue.publish", "rabbit");
     const sub = blankQueueStep("queue.consume", "rabbit");
     f.steps = [
-      { ...pub, id: "p", queue: { ...pub.queue!, destination: "orders", routingKey: "order.created", headers: [{ key: "x-tenant", value: "{{tenant}}" }], body: '{"id": {{n}}}' } },
-      { ...sub, id: "c", queue: { ...sub.queue!, destination: "orders", matchRun: true, timeoutMs: 5000 }, checks: [{ left: "body.status", op: "==", right: '"paid"' }] },
+      {
+        ...pub,
+        id: "p",
+        queue: {
+          ...pub.queue!,
+          destination: "orders",
+          routingKey: "order.created",
+          headers: [{ key: "x-tenant", value: "{{tenant}}" }],
+          body: '{"id": {{n}}}',
+        },
+      },
+      {
+        ...sub,
+        id: "c",
+        queue: { ...sub.queue!, destination: "orders", matchRun: true, timeoutMs: 5000 },
+        checks: [{ left: "body.status", op: "==", right: '"paid"' }],
+      },
     ];
     const text = serializeFlow(f).text;
     const disk = JSON.parse(text);
-    expect(disk.steps[0]).toEqual({ id: "p", type: "queue.publish", name: "Publish message", queue: { broker: "rabbit", destination: "orders", routingKey: "order.created", headers: { "x-tenant": "{{tenant}}" }, body: '{"id": {{n}}}' } });
+    expect(disk.steps[0]).toEqual({
+      id: "p",
+      type: "queue.publish",
+      name: "Publish message",
+      queue: { broker: "rabbit", destination: "orders", routingKey: "order.created", headers: { "x-tenant": "{{tenant}}" }, body: '{"id": {{n}}}' },
+    });
     expect(disk.steps[1].queue).toEqual({ broker: "rabbit", destination: "orders", routingKey: "#", matchRun: true, timeoutMs: 5000 });
     expect(serializeFlow(parseFlow(f.path, text)).text).toBe(text);
-    const env = parseEnv("local", JSON.stringify({ vars: {}, brokers: { rabbit: { type: "rabbitmq", url: "amqp://localhost" }, events: { type: "kafka", url: "localhost:9092" }, bad: { type: "x" } } }));
+    const env = parseEnv(
+      "local",
+      JSON.stringify({
+        vars: {},
+        brokers: { rabbit: { type: "rabbitmq", url: "amqp://localhost" }, events: { type: "kafka", url: "localhost:9092" }, bad: { type: "x" } },
+      }),
+    );
     expect(env.brokers).toEqual({ rabbit: { type: "rabbitmq", url: "amqp://localhost" }, events: { type: "kafka", url: "localhost:9092" } });
     expect(JSON.parse(serializeEnv(env).shared).brokers).toEqual(env.brokers);
   });

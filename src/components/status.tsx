@@ -45,12 +45,17 @@ export const STATUS_INK: Record<Shown, string> = {
   queued: "text-idle-ink",
 };
 
-
 /** Status carried by shape as well as hue: solid, dashed ring, struck ring, hollow. */
 export function StatusMark({ status, size = 10, className }: { status: Shown; size?: number; className?: string }) {
   const r = size / 2 - 1;
   const c = size / 2;
-  const common = { width: size, height: size, viewBox: `0 0 ${size} ${size}`, "aria-hidden": true, className: `flex-none ${className ?? ""}${status === "starting" || status === "waiting" ? " animate-spin-slow" : ""}` } as const;
+  const common = {
+    width: size,
+    height: size,
+    viewBox: `0 0 ${size} ${size}`,
+    "aria-hidden": true,
+    className: `flex-none ${className ?? ""}${status === "starting" || status === "waiting" ? " animate-spin-slow" : ""}`,
+  } as const;
   switch (status) {
     case "running":
       return (

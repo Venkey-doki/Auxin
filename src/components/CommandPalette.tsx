@@ -39,7 +39,13 @@ export function CommandPalette() {
     const out: Item[] = [];
     for (const s of services) {
       const st = shownStatus(runtime[s.id], now);
-      out.push({ id: "svc" + s.id, label: s.name, hint: "Open service", icon: <StatusMark status={st} className={STATUS_TEXT[st]} />, run: () => navigate({ type: "service", id: s.id }) });
+      out.push({
+        id: "svc" + s.id,
+        label: s.name,
+        hint: "Open service",
+        icon: <StatusMark status={st} className={STATUS_TEXT[st]} />,
+        run: () => navigate({ type: "service", id: s.id }),
+      });
       out.push(
         isLive(runtime[s.id])
           ? { id: "stop" + s.id, label: `Stop ${s.name}`, hint: "Service", icon: <Square />, run: () => void stopService(s.id) }
@@ -47,8 +53,21 @@ export function CommandPalette() {
       );
     }
     for (const f of flows) {
-      out.push({ id: "f" + f.path, label: f.name, hint: `Flow · ${allSteps(f.steps).length} requests`, icon: <Workflow />, run: () => navigate({ type: "flow", id: f.path }) });
-      if (f.steps.length) out.push({ id: "rf" + f.path, label: `Run ${f.name}`, hint: "Flow", icon: <Play />, run: () => (navigate({ type: "flow", id: f.path }), void runFlow(f.path)) });
+      out.push({
+        id: "f" + f.path,
+        label: f.name,
+        hint: `Flow · ${allSteps(f.steps).length} requests`,
+        icon: <Workflow />,
+        run: () => navigate({ type: "flow", id: f.path }),
+      });
+      if (f.steps.length)
+        out.push({
+          id: "rf" + f.path,
+          label: `Run ${f.name}`,
+          hint: "Flow",
+          icon: <Play />,
+          run: () => (navigate({ type: "flow", id: f.path }), void runFlow(f.path)),
+        });
     }
     for (const g of ws?.groups ?? []) {
       out.push({ id: "g" + g.id, label: g.name, hint: "Open group", icon: <Rows3 />, run: () => navigate({ type: "group", id: g.id }) });
@@ -119,7 +138,10 @@ export function CommandPalette() {
               aria-selected={idx === sel}
               onMouseMove={() => setSel(idx)}
               onClick={() => choose(i)}
-              className={cx("flex h-9 w-full items-center gap-3 rounded-md px-3 text-left [&_svg]:size-3.5 [&_svg]:flex-none", idx === sel ? "bg-surface-3 text-fg" : "text-fg-2")}
+              className={cx(
+                "flex h-9 w-full items-center gap-3 rounded-md px-3 text-left [&_svg]:size-3.5 [&_svg]:flex-none",
+                idx === sel ? "bg-surface-3 text-fg" : "text-fg-2",
+              )}
             >
               <span className="grid w-4 place-items-center text-fg-3">{i.icon}</span>
               <span className="min-w-0 flex-1 truncate">{i.label}</span>

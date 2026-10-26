@@ -3,7 +3,7 @@
 
 use crate::netpolicy::{Blocked, NetPolicy, Resolver};
 use base64::Engine as _;
-use reqwest::{cookie::Jar, redirect::Policy, Client, Method};
+use reqwest::{Client, Method, cookie::Jar, redirect::Policy};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -201,11 +201,7 @@ async fn execute(state: &HttpState, req: HttpRequest, temp_dir: PathBuf) -> Resu
     let resp = rb.send().await.map_err(|e| friendly(e, &req.url))?;
     let first_byte_ms = started.elapsed().as_millis() as u64;
     let status = resp.status();
-    let headers: Vec<(String, String)> = resp
-        .headers()
-        .iter()
-        .map(|(k, v)| (k.to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned()))
-        .collect();
+    let headers: Vec<(String, String)> = resp.headers().iter().map(|(k, v)| (k.to_string(), String::from_utf8_lossy(v.as_bytes()).into_owned())).collect();
     let content_type = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(String::from);
     let bytes = resp.bytes().await.map_err(|e| friendly(e, &req.url))?;
     let total_ms = started.elapsed().as_millis() as u64;
@@ -454,7 +450,9 @@ mod tests {
             let err = body_file(root.as_deref(), rel).unwrap_err();
             assert!(err.contains("outside the workspace"), "{rel}: {err}");
         }
-        for (path, text) in [(".env", "A=1"), (".env.local", "A=1"), (".auxin/env/local.secret.json", "{}"), (".git/config", "[core]"), ("svc/.env.production", "A=1")] {
+        for (path, text) in
+            [(".env", "A=1"), (".env.local", "A=1"), (".auxin/env/local.secret.json", "{}"), (".git/config", "[core]"), ("svc/.env.production", "A=1")]
+        {
             std::fs::create_dir_all(project.join(path).parent().unwrap()).unwrap();
             std::fs::write(project.join(path), text).unwrap();
             assert!(body_file(root.as_deref(), path).unwrap_err().contains("holds secrets or git data"), "{path}");

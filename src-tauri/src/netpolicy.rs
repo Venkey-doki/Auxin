@@ -2,8 +2,8 @@
 //! from a cloned repo, so where a step may connect is decided here, not in the UI.
 //! Local and private targets are allowed by default: that is what Auxin is for.
 
-use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use reqwest::Url;
+use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use serde::Deserialize;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
@@ -226,9 +226,7 @@ impl Resolve for Resolver {
         let host = name.as_str().to_string();
         Box::pin(async move {
             let h = host.clone();
-            let addrs: Vec<SocketAddr> = tauri::async_runtime::spawn_blocking(move || (h.as_str(), 0).to_socket_addrs())
-                .await??
-                .collect();
+            let addrs: Vec<SocketAddr> = tauri::async_runtime::spawn_blocking(move || (h.as_str(), 0).to_socket_addrs()).await??.collect();
             let ok = policy.filter(&host, addrs)?;
             Ok::<_, Box<dyn std::error::Error + Send + Sync>>(Box::new(ok.into_iter()) as Addrs)
         })
@@ -276,7 +274,18 @@ mod tests {
 
     #[test]
     fn private_addresses_follow_allow_private() {
-        for url in ["http://10.0.0.5/", "http://127.0.0.1:8080/", "http://localhost:3000/", "http://api.localhost/", "http://[::1]/", "http://172.16.0.1/", "http://192.168.1.1/", "http://100.64.0.1/", "http://[fd12::1]/", "http://[::ffff:10.0.0.5]/"] {
+        for url in [
+            "http://10.0.0.5/",
+            "http://127.0.0.1:8080/",
+            "http://localhost:3000/",
+            "http://api.localhost/",
+            "http://[::1]/",
+            "http://172.16.0.1/",
+            "http://192.168.1.1/",
+            "http://100.64.0.1/",
+            "http://[fd12::1]/",
+            "http://[::ffff:10.0.0.5]/",
+        ] {
             assert!(check(&policy(true), url).is_ok(), "{url}");
             assert!(check(&policy(false), url).is_err(), "{url}");
         }
@@ -322,7 +331,10 @@ mod tests {
         let url = |u: &str| Url::parse(u).unwrap();
         let p = NetPolicy { allow_private: true, allow_hosts: vec!["*.example.com".into()], env: "staging".into() };
         // A name only the proxy can resolve is held to the allowed hosts by name.
-        assert_eq!(p.check_name(&url("https://prod.unresolvable.invalid/x")).unwrap_err().0, "Blocked by the network rules of “staging”: prod.unresolvable.invalid isn't in this environment's allowed hosts.");
+        assert_eq!(
+            p.check_name(&url("https://prod.unresolvable.invalid/x")).unwrap_err().0,
+            "Blocked by the network rules of “staging”: prod.unresolvable.invalid isn't in this environment's allowed hosts."
+        );
         assert!(p.check_name(&url("https://api.example.com/x")).is_ok());
         // Private names stay with `allow_private`, which `check_url` already judges by name.
         let private_off = NetPolicy { allow_private: false, allow_hosts: Vec::new(), env: String::new() };
@@ -356,7 +368,10 @@ mod tests {
         assert_eq!(on.check_host("127.0.0.1", 5672).unwrap(), vec![SocketAddr::from(([127, 0, 0, 1], 5672))]);
         assert_eq!(on.check_host("[::1]", 9092).unwrap(), vec![SocketAddr::from((Ipv6Addr::LOCALHOST, 9092))]);
         assert!(on.check_host("localhost", 9092).unwrap().iter().all(|a| a.ip().is_loopback() && a.port() == 9092));
-        assert_eq!(on.check_host("169.254.169.254", 80).unwrap_err().0, "Blocked by the network rules of “staging”: 169.254.169.254 is a cloud metadata address.");
+        assert_eq!(
+            on.check_host("169.254.169.254", 80).unwrap_err().0,
+            "Blocked by the network rules of “staging”: 169.254.169.254 is a cloud metadata address."
+        );
         assert!(on.check_host("metadata.google.internal", 80).is_err());
         assert!(off.check_host("localhost", 5672).unwrap_err().0.contains("localhost is a private address"));
         assert!(off.check_host("10.0.0.5", 5672).unwrap_err().0.contains("10.0.0.5 is a private address"));

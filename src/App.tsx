@@ -13,7 +13,6 @@ import { boot, dismissToast, navigate, selectServices, setPalette, toggleSidebar
 
 let booted = false;
 
-
 export default function App() {
   const ready = useStore((s) => s.ready);
   const view = useStore((s) => s.view);

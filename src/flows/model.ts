@@ -198,7 +198,24 @@ export interface EnvDoc {
 export const FLOW_SCHEMA_PATH = "schema/flow-2.json";
 
 const FLOW_KEYS = ["$schema", "version", "name", "steps", "trace", "services", "directions", "dismissed"];
-const STEP_KEYS = ["id", "type", "name", "http", "queue", "method", "url", "headers", "body", "timeoutMs", "extract", "checks", "wait", "poll", "retry", "onFailure"];
+const STEP_KEYS = [
+  "id",
+  "type",
+  "name",
+  "http",
+  "queue",
+  "method",
+  "url",
+  "headers",
+  "body",
+  "timeoutMs",
+  "extract",
+  "checks",
+  "wait",
+  "poll",
+  "retry",
+  "onFailure",
+];
 const BLOCK_KEYS = ["id", "type", "name", "when", "then", "else", "steps"];
 
 export const isStep = (i: FlowItem): i is FlowStep => i.type !== "if" && i.type !== "parallel";
@@ -219,7 +236,9 @@ export function removeItem(items: FlowItem[], id: string): FlowItem[] {
   const keep = (s: FlowStep) => s.id !== id;
   return items
     .filter((i) => i.id !== id)
-    .map((i) => (i.type === "if" ? { ...i, then: i.then.filter(keep), else: i.else.filter(keep) } : i.type === "parallel" ? { ...i, steps: i.steps.filter(keep) } : i));
+    .map((i) =>
+      i.type === "if" ? { ...i, then: i.then.filter(keep), else: i.else.filter(keep) } : i.type === "parallel" ? { ...i, steps: i.steps.filter(keep) } : i,
+    );
 }
 
 /** Appends `step` to the end of a lane. */
@@ -252,7 +271,9 @@ export function moveItem(items: FlowItem[], id: string, to: { before: string } |
     return [...list.slice(0, i), moving as T, ...list.slice(i)];
   };
   if (toTop) return insert(rest);
-  return rest.map((i) => (i.type === "if" ? { ...i, then: insert(i.then), else: insert(i.else) } : i.type === "parallel" ? { ...i, steps: insert(i.steps) } : i));
+  return rest.map((i) =>
+    i.type === "if" ? { ...i, then: insert(i.then), else: insert(i.else) } : i.type === "parallel" ? { ...i, steps: insert(i.steps) } : i,
+  );
 }
 
 export function slugify(name: string): string {
@@ -282,7 +303,23 @@ export function emptyBody(): StepBody {
 }
 
 export function blankStep(n: number, url = ""): FlowStep {
-  return { id: newStepId(), type: "http", name: `Request ${n}`, method: "GET", url, headers: [], body: emptyBody(), timeoutMs: 30_000, extract: [], checks: [], poll: null, retry: null, onFailure: "stop", queue: null, rest: {} };
+  return {
+    id: newStepId(),
+    type: "http",
+    name: `Request ${n}`,
+    method: "GET",
+    url,
+    headers: [],
+    body: emptyBody(),
+    timeoutMs: 30_000,
+    extract: [],
+    checks: [],
+    poll: null,
+    retry: null,
+    onFailure: "stop",
+    queue: null,
+    rest: {},
+  };
 }
 
 export function blankQueueStep(type: "queue.publish" | "queue.consume", broker = ""): FlowStep {
@@ -290,7 +327,16 @@ export function blankQueueStep(type: "queue.publish" | "queue.consume", broker =
     ...blankStep(0),
     type,
     name: type === "queue.publish" ? "Publish message" : "Wait for message",
-    queue: { broker, destination: "", routingKey: type === "queue.consume" ? "#" : "", key: "", headers: [], body: type === "queue.publish" ? "{}" : "", matchRun: false, timeoutMs: 15_000 },
+    queue: {
+      broker,
+      destination: "",
+      routingKey: type === "queue.consume" ? "#" : "",
+      key: "",
+      headers: [],
+      body: type === "queue.publish" ? "{}" : "",
+      matchRun: false,
+      timeoutMs: 15_000,
+    },
   };
 }
 
@@ -320,12 +366,17 @@ function parseChecks(raw: unknown): Check[] {
   const list = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? [raw] : [];
   return list
     .filter((c): c is Record<string, unknown> => !!c && typeof c === "object")
-    .map((c) => ({ left: String(c.left ?? ""), op: (CHECK_OPS.includes(c.op as CheckOp) ? c.op : "==") as CheckOp, right: c.op === "exists" || c.op === "!exists" ? "" : rightText(c.right) }));
+    .map((c) => ({
+      left: String(c.left ?? ""),
+      op: (CHECK_OPS.includes(c.op as CheckOp) ? c.op : "==") as CheckOp,
+      right: c.op === "exists" || c.op === "!exists" ? "" : rightText(c.right),
+    }));
 }
 
 const checkOut = (c: Check) => (c.op === "exists" || c.op === "!exists" ? { left: c.left, op: c.op } : { left: c.left, op: c.op, right: parseRight(c.right) });
 
-const toRows = (o: unknown): KV[] => (o && typeof o === "object" && !Array.isArray(o) ? Object.entries(o as Record<string, unknown>).map(([key, v]) => ({ key, value: String(v ?? "") })) : []);
+const toRows = (o: unknown): KV[] =>
+  o && typeof o === "object" && !Array.isArray(o) ? Object.entries(o as Record<string, unknown>).map(([key, v]) => ({ key, value: String(v ?? "") })) : [];
 
 const toObject = (rows: KV[]): Record<string, string> => {
   const out: Record<string, string> = {};
@@ -391,7 +442,8 @@ export function serializeBody(b: StepBody): { ok: true; value: unknown } | { ok:
       try {
         const parsed = JSON.parse(b.text);
         // Integers beyond 2^53 (long ids) would be rounded by a parse/print round trip; keep the source.
-        if ([...b.text.matchAll(/(?<![\w."])-?\d{16,}(?![\w."])/g)].some((m) => !Number.isSafeInteger(Number(m[0])))) return { ok: true, value: { jsonText: b.text } };
+        if ([...b.text.matchAll(/(?<![\w."])-?\d{16,}(?![\w."])/g)].some((m) => !Number.isSafeInteger(Number(m[0]))))
+          return { ok: true, value: { jsonText: b.text } };
         return { ok: true, value: { json: parsed } };
       } catch {
         // Contains unquoted {{vars}}: keep the source text so it round-trips.
@@ -412,7 +464,12 @@ export function parseFlow(path: string, text: string): FlowDoc {
     rest: pick(raw, FLOW_KEYS),
     services: (Array.isArray(raw.services) ? raw.services : [])
       .filter((x: Record<string, unknown>) => x && typeof x.ref === "string")
-      .map((x: Record<string, unknown>) => ({ ref: String(x.ref), alias: String(x.alias ?? String(x.ref).split("/").pop()), ...(typeof x.x === "number" ? { x: x.x } : {}), ...(typeof x.y === "number" ? { y: x.y } : {}) })),
+      .map((x: Record<string, unknown>) => ({
+        ref: String(x.ref),
+        alias: String(x.alias ?? String(x.ref).split("/").pop()),
+        ...(typeof x.x === "number" ? { x: x.x } : {}),
+        ...(typeof x.y === "number" ? { y: x.y } : {}),
+      })),
     ...legacyLinks(raw),
     steps: objects(raw.steps).map(parseItem),
   };
@@ -431,7 +488,15 @@ function legacyLinks(raw: Record<string, unknown>): { legacyLinks?: LegacyLinks 
 
 function parseItem(raw: Record<string, unknown>): FlowItem {
   const base = { id: String(raw.id ?? newStepId()), rest: pick(raw, BLOCK_KEYS) };
-  if (raw.type === "if") return { ...base, type: "if", name: String(raw.name ?? "If"), when: parseChecks(raw.when), then: objects(raw.then).map(parseStep), else: objects(raw.else).map(parseStep) };
+  if (raw.type === "if")
+    return {
+      ...base,
+      type: "if",
+      name: String(raw.name ?? "If"),
+      when: parseChecks(raw.when),
+      then: objects(raw.then).map(parseStep),
+      else: objects(raw.else).map(parseStep),
+    };
   if (raw.type === "parallel") return { ...base, type: "parallel", name: String(raw.name ?? "At the same time"), steps: objects(raw.steps).map(parseStep) };
   return parseStep(raw);
 }
@@ -443,7 +508,11 @@ function parseStep(raw: Record<string, unknown>): FlowStep {
 function parseRetry(r: unknown): Retry | null {
   if (!r || typeof r !== "object") return null;
   const o = r as Record<string, unknown>;
-  return { max: Math.min(5, Math.max(1, Math.round(Number(o.max)) || 1)), backoffMs: Math.max(0, Number(o.backoffMs) || 500), on: o.on === "any" ? "any" : "errors" };
+  return {
+    max: Math.min(5, Math.max(1, Math.round(Number(o.max)) || 1)),
+    backoffMs: Math.max(0, Number(o.backoffMs) || 500),
+    on: o.on === "any" ? "any" : "errors",
+  };
 }
 
 function parseHttp(step: Record<string, unknown>): FlowStep {
@@ -523,7 +592,9 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
           broker: q.broker,
           destination: q.destination,
           ...(q.routingKey ? { routingKey: q.routingKey } : {}),
-          ...(s.type === "queue.publish" ? { ...(q.key ? { key: q.key } : {}), headers: toObject(q.headers), body: q.body } : { matchRun: q.matchRun, timeoutMs: q.timeoutMs }),
+          ...(s.type === "queue.publish"
+            ? { ...(q.key ? { key: q.key } : {}), headers: toObject(q.headers), body: q.body }
+            : { matchRun: q.matchRun, timeoutMs: q.timeoutMs }),
           ...s.restIn?.queue,
         },
         ...(s.type === "queue.consume" ? { extract: toObject(s.extract), checks: s.checks.filter((c) => c.left.trim()).map(checkOut) } : {}),
@@ -552,7 +623,9 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
       },
       extract: toObject(s.extract),
       checks: s.checks.filter((c) => c.left.trim()).map(checkOut),
-      ...(s.poll ? { wait: { until: s.poll.until.filter((c) => c.left.trim()).map(checkOut), everyMs: s.poll.everyMs, maxTries: s.poll.maxTries, ...s.restIn?.wait } } : {}),
+      ...(s.poll
+        ? { wait: { until: s.poll.until.filter((c) => c.left.trim()).map(checkOut), everyMs: s.poll.everyMs, maxTries: s.poll.maxTries, ...s.restIn?.wait } }
+        : {}),
       ...(s.retry ? { retry: s.retry } : {}),
       ...(s.onFailure === "continue" ? { onFailure: "continue" } : {}),
       ...s.rest,
@@ -562,7 +635,15 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
     isStep(i)
       ? stepOut(i)
       : i.type === "if"
-        ? { id: i.id, type: "if", name: i.name, when: i.when.filter((c) => c.left.trim()).map(checkOut), then: i.then.map(stepOut), else: i.else.map(stepOut), ...i.rest }
+        ? {
+            id: i.id,
+            type: "if",
+            name: i.name,
+            when: i.when.filter((c) => c.left.trim()).map(checkOut),
+            then: i.then.map(stepOut),
+            else: i.else.map(stepOut),
+            ...i.rest,
+          }
         : { id: i.id, type: "parallel", name: i.name, steps: i.steps.map(stepOut), ...i.rest },
   );
   const out = {

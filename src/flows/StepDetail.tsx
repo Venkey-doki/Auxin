@@ -165,7 +165,11 @@ function HttpDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; step: FlowS
               <ChecksEditor
                 checks={step.checks}
                 onChange={(checks) => patch({ checks })}
-                note={step.onFailure === "continue" ? "If a check fails, the request fails and the flow keeps going." : "If a check fails, the flow stops here and later requests are skipped."}
+                note={
+                  step.onFailure === "continue"
+                    ? "If a check fails, the request fails and the flow keeps going."
+                    : "If a check fails, the flow stops here and later requests are skipped."
+                }
                 empty="With no checks, the request passes when the status is below 400."
               />
             )}
@@ -181,7 +185,19 @@ function HttpDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; step: FlowS
 }
 
 /** `note` is shown under the rows once there are checks; `empty` before. `first` is the row "Add check" starts with. */
-export function ChecksEditor({ checks, onChange, note, empty, first = { left: "status", op: "==", right: "200" } }: { checks: Check[]; onChange: (c: Check[]) => void; note?: string; empty?: string; first?: Check }) {
+export function ChecksEditor({
+  checks,
+  onChange,
+  note,
+  empty,
+  first = { left: "status", op: "==", right: "200" },
+}: {
+  checks: Check[];
+  onChange: (c: Check[]) => void;
+  note?: string;
+  empty?: string;
+  first?: Check;
+}) {
   const cell = "h-8 w-full bg-transparent px-2.5 font-mono text-sm text-fg outline-none placeholder:text-fg-3 focus:bg-rail";
   return (
     <div className="grid gap-2">
@@ -334,7 +350,9 @@ function RetryEditor({ step, onChange }: { step: FlowStep; onChange: (p: Partial
               seconds first, then twice as long each time.
             </div>
             <span className="text-xs text-fg-3">
-              {r.on === "errors" ? "Errors are no response at all (refused, timed out) or a 5xx status." : "Any failure includes failed checks and a poll that never matched."}
+              {r.on === "errors"
+                ? "Errors are no response at all (refused, timed out) or a 5xx status."
+                : "Any failure includes failed checks and a poll that never matched."}
               {unsafe && ` A retried ${step.method} can repeat its side effect, such as creating a record twice.`}
             </span>
           </>
@@ -433,7 +451,9 @@ function BodyEditor({ path, step, invalid }: { path: string; step: FlowStep; inv
             Sent as-is (variables in the file aren't replaced). Paths are relative to the workspace, so teammates can use the same flow.
           </span>
           {outsideWorkspace(step.body.file) && (
-            <span className="text-xs text-warm">This file is outside the workspace, so Auxin won't send it. Move it into the workspace folder and choose it again.</span>
+            <span className="text-xs text-warm">
+              This file is outside the workspace, so Auxin won't send it. Move it into the workspace folder and choose it again.
+            </span>
           )}
           {typeof filePreview === "string" && <span className="text-xs text-bad-soft">{filePreview}</span>}
           {filePreview && typeof filePreview === "object" && (
@@ -517,7 +537,9 @@ function ResponsePanel({ doc, out, notTaken, onCancel }: { doc: FlowDoc; out?: S
     );
   if (out.state === "queued") return center(<span className="text-sm text-fg-3">Waiting for the earlier requests…</span>);
   if (out.state === "skipped")
-    return center(<span className="text-sm text-fg-3">{notTaken ? "Not run: the if block took the other lane." : "Skipped because an earlier request didn't pass."}</span>);
+    return center(
+      <span className="text-sm text-fg-3">{notTaken ? "Not run: the if block took the other lane." : "Skipped because an earlier request didn't pass."}</span>,
+    );
   if ((out.state === "sending" || out.state === "polling") && !out.res)
     return center(
       <>
@@ -694,9 +716,7 @@ function TraceView({ out, injected }: { out: StepOutcome; injected: boolean }) {
         <>
           <div className="flex items-center gap-2 px-4 pt-2.5 pb-1 text-xs text-fg-3">
             <span className="font-semibold tracking-wider uppercase">Spans</span>
-            <span>
-              {out.spans.length} from OpenTelemetry · timings are measured
-            </span>
+            <span>{out.spans.length} from OpenTelemetry · timings are measured</span>
           </div>
           <SpanWaterfall spans={out.spans} traceId={out.traceId} />
           <div className="px-4 pt-2.5 pb-0.5 text-xs font-semibold tracking-wider text-fg-3 uppercase">Log lines</div>

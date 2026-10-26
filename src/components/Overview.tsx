@@ -72,7 +72,8 @@ function Welcome() {
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">Open the folder that holds your services</h1>
           <p className="mt-2 text-base text-fg-2">
-            Auxin looks inside each sub-folder for <code className="font-mono text-fg">package.json</code> scripts, Python entry points and virtualenvs, Makefiles, Procfiles, Go, Rust and Java projects, and lists them ready to start. Nothing is changed in your repos.
+            Auxin looks inside each sub-folder for <code className="font-mono text-fg">package.json</code> scripts, Python entry points and virtualenvs,
+            Makefiles, Procfiles, Go, Rust and Java projects, and lists them ready to start. Nothing is changed in your repos.
           </p>
           <Button variant="primary" className="mt-6 h-9 px-4 text-base" onClick={() => void choose()}>
             <FolderOpen /> Open folder…

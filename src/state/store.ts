@@ -1,17 +1,7 @@
 import { create } from "zustand";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { api, type OtelStatus } from "../lib/api";
-import type {
-  Config,
-  DetectedService,
-  Group,
-  GroupLayout,
-  Runtime,
-  Service,
-  ServiceOverride,
-  View,
-  Workspace,
-} from "../lib/types";
+import type { Config, DetectedService, Group, GroupLayout, Runtime, Service, ServiceOverride, View, Workspace } from "../lib/types";
 import { basename, detectPort, hashColor, uid } from "../lib/util";
 import { appendLogs, systemLog } from "./logs";
 
@@ -144,7 +134,7 @@ function cleanLine(text: string): string {
     /^\|\s*/,
     /^-\s+/,
   ];
-  for (let changed = true; changed; ) {
+  for (let changed = true; changed;) {
     changed = false;
     for (const re of prefixes) {
       const next = t.replace(re, "");
@@ -212,7 +202,10 @@ function migrateLegacyFlows(config: Config): Config {
   const next = { ...config, workspaces };
   // Persist right away so the notice shows once.
   void api.saveConfig(JSON.stringify(next, null, 2));
-  window.setTimeout(() => toast("info", "Flows now chain HTTP requests", `Your ${moved} earlier flow${moved > 1 ? "s are" : " is"} now under Groups, with the same services.`), 600);
+  window.setTimeout(
+    () => toast("info", "Flows now chain HTTP requests", `Your ${moved} earlier flow${moved > 1 ? "s are" : " is"} now under Groups, with the same services.`),
+    600,
+  );
   return next;
 }
 
@@ -373,7 +366,9 @@ export async function startService(id: string): Promise<boolean> {
     set({ view: { type: "service", id } });
     return false;
   }
-  set((s) => ({ runtime: { ...s.runtime, [id]: { ...s.runtime[id], status: "starting", startedAt: Date.now(), code: undefined, error: undefined, port: undefined } } }));
+  set((s) => ({
+    runtime: { ...s.runtime, [id]: { ...s.runtime[id], status: "starting", startedAt: Date.now(), code: undefined, error: undefined, port: undefined } },
+  }));
   try {
     const port = svc.sendTraces ? get().otel?.port : null;
     await api.start({ id, command: svc.command, cwd: svc.cwd, env: withOtelEnv(svc.env, svc.spanName, port ?? null), venv: svc.useVenv ? svc.venv : null });

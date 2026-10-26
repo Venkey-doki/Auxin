@@ -15,7 +15,16 @@ import { TrendList } from "./TrendList";
 import { flowTrends } from "./trends";
 
 const TONE: Record<RunRecord["status"], Shown> = { passed: "running", failed: "crashed", cancelled: "stopped", running: "starting" };
-const STEP_TONE: Record<string, Shown> = { passed: "running", failed: "crashed", error: "crashed", skipped: "stopped", cancelled: "stopped", queued: "queued", sending: "starting", polling: "starting" };
+const STEP_TONE: Record<string, Shown> = {
+  passed: "running",
+  failed: "crashed",
+  error: "crashed",
+  skipped: "stopped",
+  cancelled: "stopped",
+  queued: "queued",
+  sending: "starting",
+  polling: "starting",
+};
 
 export function HistoryPanel({ path, onClose }: { path: string; onClose: () => void }) {
   const run = useFlows((s) => s.runs[path]);
@@ -47,7 +56,11 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
         {runs?.length === 0 && <p className="p-4 text-sm text-fg-3">No runs yet. Press Run flow; every run is kept in .auxin/runs (ignored by git).</p>}
         {runs && runs.length >= 2 && (
           <section className="border-b border-line pb-1" aria-label="Trends">
-            <button className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-surface-2" onClick={() => setShowTrends((v) => !v)} aria-expanded={showTrends}>
+            <button
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-surface-2"
+              onClick={() => setShowTrends((v) => !v)}
+              aria-expanded={showTrends}
+            >
               <ChevronRight className={cx("size-3.5 flex-none text-fg-3 transition-transform", showTrends && "rotate-90")} />
               <span className="text-sm font-semibold">Trends</span>
               <span className="text-xs text-fg-3">response times over the last {runs.length} runs, oldest first</span>
@@ -62,11 +75,17 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
           const isOpen = open === r.runId;
           return (
             <div key={r.runId} className="border-b border-line">
-              <button className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left hover:bg-surface-2" onClick={() => setOpen(isOpen ? null : r.runId)} aria-expanded={isOpen}>
+              <button
+                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left hover:bg-surface-2"
+                onClick={() => setOpen(isOpen ? null : r.runId)}
+                aria-expanded={isOpen}
+              >
                 <ChevronRight className={cx("size-3.5 flex-none text-fg-3 transition-transform", isOpen && "rotate-90")} />
                 <StatusMark status={TONE[r.status]} size={9} className={STATUS_TEXT[TONE[r.status]]} />
                 <span className="grid min-w-0 flex-1">
-                  <span className="text-sm text-fg">{new Date(r.startedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                  <span className="text-sm text-fg">
+                    {new Date(r.startedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  </span>
                   <span className="text-xs text-fg-3">
                     {r.status} · env {r.env}
                     {r.replayOf && " · replay"}
@@ -84,11 +103,17 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
                       size="sm"
                       disabled={!r.snapshot || running}
                       onClick={() => void replayRun(path, r)}
-                      title={r.snapshot ? "Run the flow as it was in this run, with the current environment" : "Recorded before replay existed: this run didn't save its flow"}
+                      title={
+                        r.snapshot
+                          ? "Run the flow as it was in this run, with the current environment"
+                          : "Recorded before replay existed: this run didn't save its flow"
+                      }
                     >
                       <RotateCcw /> Replay
                     </Button>
-                    <span className="text-xs text-fg-3">{r.snapshot ? "Same requests as this run, current environment." : "Can't replay a run recorded before replay existed."}</span>
+                    <span className="text-xs text-fg-3">
+                      {r.snapshot ? "Same requests as this run, current environment." : "Can't replay a run recorded before replay existed."}
+                    </span>
                   </div>
                   {r.steps.map((s) => {
                     const p = prev?.steps.find((x) => x.id === s.id);
@@ -121,7 +146,9 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
                               ✕ {c.label} · got {c.got}
                             </span>
                           ))}
-                        {s.hops.length > 0 && <span className="truncate pl-4 font-mono text-xs text-fg-3">{s.hops.map((h) => `${h.alias}${h.ok ? "" : " ⚠"}`).join(" → ")}</span>}
+                        {s.hops.length > 0 && (
+                          <span className="truncate pl-4 font-mono text-xs text-fg-3">{s.hops.map((h) => `${h.alias}${h.ok ? "" : " ⚠"}`).join(" → ")}</span>
+                        )}
                         {notTaken && <span className="pl-4 text-xs text-fg-3">not taken by the if block</span>}
                         {(s.request || s.response) && <Exchange step={s} />}
                       </div>
@@ -139,7 +166,9 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
 
 /** Whether a request sat in an if lane this run didn't take (from the run's own flow). */
 function laneNotTaken(r: RunRecord, stepId: string): boolean {
-  const blocks = ((r.snapshot as { steps?: { id: string; type: string; then?: { id: string }[]; else?: { id: string }[] }[] })?.steps ?? []).filter((b) => b.type === "if");
+  const blocks = ((r.snapshot as { steps?: { id: string; type: string; then?: { id: string }[]; else?: { id: string }[] }[] })?.steps ?? []).filter(
+    (b) => b.type === "if",
+  );
   const b = blocks.find((x) => [...(x.then ?? []), ...(x.else ?? [])].some((s) => s.id === stepId));
   const taken = b && r.branches?.[b.id];
   return !!taken && !(b[taken] ?? []).some((s) => s.id === stepId);
@@ -161,7 +190,11 @@ function Exchange({ step }: { step: RunRecord["steps"][number] }) {
                 {step.method} {step.url}
               </span>
               <HeaderList rows={step.request.headers} bare narrow />
-              {step.request.body && <pre className="max-h-40 overflow-auto rounded bg-rail p-2 font-mono text-xs break-all whitespace-pre-wrap text-fg-2 select-text">{step.request.body}</pre>}
+              {step.request.body && (
+                <pre className="max-h-40 overflow-auto rounded bg-rail p-2 font-mono text-xs break-all whitespace-pre-wrap text-fg-2 select-text">
+                  {step.request.body}
+                </pre>
+              )}
             </div>
           )}
           {step.response && (

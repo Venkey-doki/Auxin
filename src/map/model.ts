@@ -103,7 +103,14 @@ export function serializeTopology(t: TopologyFile): string {
   return JSON.stringify({ version: 1, nodes: t.nodes, edges: t.edges, removed: [...new Set(t.removed)].sort(), positions: t.positions }, null, 2) + "\n";
 }
 
-export function mergeTopology(input: { root: string; services: Service[]; discovery: Discovery | null; observed: Observation[]; file: TopologyFile; now?: number }): { nodes: MapNode[]; edges: MapEdge[] } {
+export function mergeTopology(input: {
+  root: string;
+  services: Service[];
+  discovery: Discovery | null;
+  observed: Observation[];
+  file: TopologyFile;
+  now?: number;
+}): { nodes: MapNode[]; edges: MapEdge[] } {
   const { root, services, discovery, observed, file } = input;
   const now = input.now ?? Date.now();
   const removed = new Set(file.removed);
@@ -111,12 +118,29 @@ export function mergeTopology(input: { root: string; services: Service[]; discov
 
   for (const svc of services) {
     const key = serviceKey(svc, root);
-    nodes.set(key, { key, kind: svc.framework && FRONTEND.test(svc.framework) ? "frontend" : "service", label: svc.name, service: svc, manual: false, evidence: [] });
+    nodes.set(key, {
+      key,
+      kind: svc.framework && FRONTEND.test(svc.framework) ? "frontend" : "service",
+      label: svc.name,
+      service: svc,
+      manual: false,
+      evidence: [],
+    });
   }
   for (const n of discovery?.nodes ?? []) {
-    if (!nodes.has(n.key)) nodes.set(n.key, { key: n.key, kind: n.kind, label: n.label, tech: n.tech ?? undefined, endpoint: n.endpoint ?? undefined, manual: false, evidence: n.evidence });
+    if (!nodes.has(n.key))
+      nodes.set(n.key, {
+        key: n.key,
+        kind: n.kind,
+        label: n.label,
+        tech: n.tech ?? undefined,
+        endpoint: n.endpoint ?? undefined,
+        manual: false,
+        evidence: n.evidence,
+      });
   }
-  for (const n of file.nodes) if (!nodes.has(n.key)) nodes.set(n.key, { ...n, manual: true, evidence: [{ source: "manual", confidence: "manual", detail: "Added by you" }] });
+  for (const n of file.nodes)
+    if (!nodes.has(n.key)) nodes.set(n.key, { ...n, manual: true, evidence: [{ source: "manual", confidence: "manual", detail: "Added by you" }] });
   for (const k of removed) if (!file.nodes.some((n) => n.key === k)) nodes.delete(k);
 
   const edges = new Map<string, MapEdge>();

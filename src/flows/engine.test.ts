@@ -1,14 +1,50 @@
 import { describe, expect, it } from "vitest";
 import type { HttpRequest, HttpResponse, QueueMessage, StepRequest } from "../lib/api";
-import { PARALLEL_LIMIT, prepareQueue, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, runQueueStep, validateFlow, type ValidateContext } from "./engine";
-import { allSteps, blankBlock, blankQueueStep, blankStep, moveItem, newFlow, parseFlow, serializeFlow, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
+import {
+  PARALLEL_LIMIT,
+  prepareQueue,
+  prepareRequest,
+  redactBody,
+  redactHeaders,
+  runHttpStep,
+  runItems,
+  runQueueStep,
+  validateFlow,
+  type ValidateContext,
+} from "./engine";
+import {
+  allSteps,
+  blankBlock,
+  blankQueueStep,
+  blankStep,
+  moveItem,
+  newFlow,
+  parseFlow,
+  serializeFlow,
+  type FlowItem,
+  type FlowStep,
+  type IfBlock,
+  type ParallelBlock,
+} from "./model";
 import type { VarSources } from "./vars";
 
 const src: VarSources = { secrets: { token: "s3cret" }, vars: {}, serviceUrls: { gw: "http://localhost:4000" } };
 const step = (p: Partial<FlowStep>): FlowStep => ({ ...blankStep(1), ...p });
 const res = (status: number, body: unknown): HttpResponse => {
   const text = JSON.stringify(body);
-  return { status, statusText: "", headers: [], contentType: "application/json", bodyText: text, bodyBase64: null, size: text.length, truncated: false, fullBodyPath: null, firstByteMs: 1, totalMs: 2 };
+  return {
+    status,
+    statusText: "",
+    headers: [],
+    contentType: "application/json",
+    bodyText: text,
+    bodyBase64: null,
+    size: text.length,
+    truncated: false,
+    fullBodyPath: null,
+    firstByteMs: 1,
+    totalMs: 2,
+  };
 };
 const opts = { reqId: "r1", jar: "j", insecureTls: false, root: "/w" };
 
@@ -33,14 +69,26 @@ describe("prepareRequest", () => {
 describe("runHttpStep", () => {
   it("polls until the condition holds, then extracts", async () => {
     let n = 0;
-    const s = step({ url: "http://x", extract: [{ key: "r", value: "body.r" }], poll: { until: [{ left: "body.done", op: "==", right: "true" }], everyMs: 10, maxTries: 5 } });
-    const out = await runHttpStep(s, prepareRequest(s, src, false), opts, { send: async () => res(200, { done: ++n === 3, r: "ok" }), cancelled: () => false, sleep: async () => undefined });
+    const s = step({
+      url: "http://x",
+      extract: [{ key: "r", value: "body.r" }],
+      poll: { until: [{ left: "body.done", op: "==", right: "true" }], everyMs: 10, maxTries: 5 },
+    });
+    const out = await runHttpStep(s, prepareRequest(s, src, false), opts, {
+      send: async () => res(200, { done: ++n === 3, r: "ok" }),
+      cancelled: () => false,
+      sleep: async () => undefined,
+    });
     expect(out).toMatchObject({ state: "passed", tries: 3, extracted: [{ key: "r", value: "ok" }] });
   });
 
   it("turns a refused connection into an error with the port", async () => {
     const s = step({ url: "http://localhost:4000/x" });
-    const out = await runHttpStep(s, prepareRequest(s, src, false), opts, { send: () => Promise.reject("Couldn't connect to localhost:4000. Is the service running?"), cancelled: () => false, sleep: async () => undefined });
+    const out = await runHttpStep(s, prepareRequest(s, src, false), opts, {
+      send: () => Promise.reject("Couldn't connect to localhost:4000. Is the service running?"),
+      cancelled: () => false,
+      sleep: async () => undefined,
+    });
     expect(out).toMatchObject({ state: "error", refusedPort: 4000 });
   });
 });
@@ -76,7 +124,11 @@ describe("retry", () => {
 
   it("gives every try its own cancel id", async () => {
     const ids: string[] = [];
-    const s = step({ url: "http://x", retry: { max: 1, backoffMs: 0, on: "errors" }, poll: { until: [{ left: "body.done", op: "==", right: "true" }], everyMs: 0, maxTries: 2 } });
+    const s = step({
+      url: "http://x",
+      retry: { max: 1, backoffMs: 0, on: "errors" },
+      poll: { until: [{ left: "body.done", op: "==", right: "true" }], everyMs: 0, maxTries: 2 },
+    });
     await runHttpStep(s, prepareRequest(s, src, false), opts, { ...noWait, send: async (r) => (ids.push(r.id), res(500, { done: true })) });
     expect(ids).toEqual(["r1-1", "r1-2"]);
   });
@@ -141,7 +193,11 @@ describe("runItems", () => {
   it("cancelling marks what hasn't run as cancelled", async () => {
     let cancelled = false;
     const [a, b, c] = ids("a", "b", "c");
-    const r = await runItems([a, par({ steps: [b] }), c], { ...hooks({}), run: async () => ((cancelled = true), { state: "passed" }), isCancelled: () => cancelled });
+    const r = await runItems([a, par({ steps: [b] }), c], {
+      ...hooks({}),
+      run: async () => ((cancelled = true), { state: "passed" }),
+      isCancelled: () => cancelled,
+    });
     expect(states(r)).toEqual({ a: "passed", b: "cancelled", c: "cancelled" });
     expect(r.status).toBe("cancelled");
   });
@@ -157,7 +213,9 @@ describe("validateFlow", () => {
   });
 
   it("finds missing URLs, unknown variables and variables provided too late", () => {
-    expect(msgs([step({ id: "a", url: "" }), step({ id: "b", url: "{{gw}}/{{nope}}" }), step({ id: "c", url: "http://x/{{late}}" }), extracting("d", "late")])).toEqual([
+    expect(
+      msgs([step({ id: "a", url: "" }), step({ id: "b", url: "{{gw}}/{{nope}}" }), step({ id: "c", url: "http://x/{{late}}" }), extracting("d", "late")]),
+    ).toEqual([
       "error: Request 1 has no URL.",
       "error: {{nope}} has no value in “local”. Add it under Environment.",
       "error: {{late}} comes from request 4, which runs after this one.",
@@ -165,13 +223,20 @@ describe("validateFlow", () => {
   });
 
   it("uses the caller's explanation for a variable, such as a service with no known port", () => {
-    expect(validateFlow([step({ id: "a", url: "{{orders}}/x" })], { ...ctx, explain: (n) => (n === "orders" ? "port unknown" : undefined) })[0].message).toBe("port unknown");
+    expect(validateFlow([step({ id: "a", url: "{{orders}}/x" })], { ...ctx, explain: (n) => (n === "orders" ? "port unknown" : undefined) })[0].message).toBe(
+      "port unknown",
+    );
   });
 
   it("checks if blocks: a request before them, a condition, and variables set in only one lane", () => {
     const lane = iff({ id: "if1", then: [extracting("t", "maybe")], else: [] });
-    expect(msgs([lane])).toContain("error: An if block reads the response (or received message) of the step just before it. Put a request or a wait-for-message step above this block.");
-    expect(msgs([step({ id: "a", url: "http://x" }), iff({ id: "if2", when: [] })])).toEqual(["error: This if block has no condition yet.", "warning: This if block has no requests yet."]);
+    expect(msgs([lane])).toContain(
+      "error: An if block reads the response (or received message) of the step just before it. Put a request or a wait-for-message step above this block.",
+    );
+    expect(msgs([step({ id: "a", url: "http://x" }), iff({ id: "if2", when: [] })])).toEqual([
+      "error: This if block has no condition yet.",
+      "warning: This if block has no requests yet.",
+    ]);
     expect(msgs([step({ id: "a", url: "http://x" }), lane, step({ id: "b", url: "http://x/{{maybe}}" })])).toEqual([
       "warning: {{maybe}} comes from a request inside an if block, so it's empty when that lane doesn't run.",
     ]);
@@ -189,13 +254,23 @@ describe("blocks in flow files", () => {
     const f = newFlow("flows/b.flow.json", "B");
     f.steps = [
       { ...step({ id: "a", url: "http://x" }), retry: { max: 2, backoffMs: 250, on: "any" }, onFailure: "continue" },
-      iff({ id: "if1", when: [{ left: "status", op: "==", right: "404" }], then: [step({ id: "t", url: "http://t" })], else: [step({ id: "e", url: "http://e" })] }),
+      iff({
+        id: "if1",
+        when: [{ left: "status", op: "==", right: "404" }],
+        then: [step({ id: "t", url: "http://t" })],
+        else: [step({ id: "e", url: "http://e" })],
+      }),
       par({ id: "p1", steps: [step({ id: "p", url: "http://p" })] }),
     ];
     const text = serializeFlow(f).text;
     const disk = JSON.parse(text);
     expect(disk.steps[0]).toMatchObject({ retry: { max: 2, backoffMs: 250, on: "any" }, onFailure: "continue" });
-    expect(disk.steps[1]).toMatchObject({ type: "if", when: [{ left: "status", op: "==", right: 404 }], then: [{ id: "t", type: "http" }], else: [{ id: "e" }] });
+    expect(disk.steps[1]).toMatchObject({
+      type: "if",
+      when: [{ left: "status", op: "==", right: 404 }],
+      then: [{ id: "t", type: "http" }],
+      else: [{ id: "e" }],
+    });
     expect(disk.steps[2]).toMatchObject({ type: "parallel", steps: [{ id: "p" }] });
     expect(serializeFlow(parseFlow(f.path, text)).text).toBe(text);
     expect(allSteps(parseFlow(f.path, text).steps).map((s) => s.id)).toEqual(["a", "t", "e", "p"]);
@@ -206,7 +281,13 @@ describe("blocks in flow files", () => {
       version: 2,
       name: "N",
       steps: [
-        { id: "a", type: "http", name: "A", http: { method: "POST", url: "http://x", body: { json: { n: 1 }, encoding: "gzip" }, proxy: "p:1" }, wait: { until: [], everyMs: 5, maxTries: 2, jitter: true } },
+        {
+          id: "a",
+          type: "http",
+          name: "A",
+          http: { method: "POST", url: "http://x", body: { json: { n: 1 }, encoding: "gzip" }, proxy: "p:1" },
+          wait: { until: [], everyMs: 5, maxTries: 2, jitter: true },
+        },
         { id: "q", type: "queue.publish", name: "Q", queue: { broker: "mq", destination: "jobs", body: "{}", priority: 5 } },
       ],
     });
@@ -248,7 +329,15 @@ describe("redaction", () => {
   });
 
   it("hides credential headers whatever their value", () => {
-    expect(redactHeaders([["Authorization", "Bearer abc"], ["X-Trace", "abc s3cret"]], ["s3cret"])).toEqual([
+    expect(
+      redactHeaders(
+        [
+          ["Authorization", "Bearer abc"],
+          ["X-Trace", "abc s3cret"],
+        ],
+        ["s3cret"],
+      ),
+    ).toEqual([
       ["Authorization", "••••••"],
       ["X-Trace", "abc ••••••"],
     ]);
@@ -267,7 +356,10 @@ describe("queue steps", () => {
   };
 
   it("resolves the broker URL with secrets, and stamps published messages with trace headers", () => {
-    const s = { ...blankQueueStep("queue.publish", "rabbit"), queue: { ...blankQueueStep("queue.publish").queue!, broker: "rabbit", destination: "orders", body: '{"id":"{{$uuid}}"}' } };
+    const s = {
+      ...blankQueueStep("queue.publish", "rabbit"),
+      queue: { ...blankQueueStep("queue.publish").queue!, broker: "rabbit", destination: "orders", body: '{"id":"{{$uuid}}"}' },
+    };
     const p = prepareQueue(s, src, brokers, true);
     expect(p.broker).toEqual({ type: "rabbitmq", url: "amqp://guest:s3cret@localhost:5672" });
     expect(p.usedSecrets).toEqual(["token"]);
@@ -281,12 +373,17 @@ describe("queue steps", () => {
     const batches = [[msg({ status: "pending" })], [], [msg({ status: "paid", orderId: "o-7" })]];
     const closed: string[] = [];
     const s = consume({ checks: [{ left: "body.status", op: "==", right: '"paid"' }], extract: [{ key: "orderId", value: "body.orderId" }] });
-    const out = await runQueueStep(s, prepareQueue(s, src, brokers, false), { reqId: "r1", subscription: "run:s", traceIds: () => [] }, {
-      exec: async (req) => (calls.push(req), (t += 500), { kind: "queue.consume", messages: batches.shift() ?? [], skipped: 1 }),
-      cancel: async (id) => void closed.push(id),
-      cancelled: () => false,
-      now: () => t,
-    });
+    const out = await runQueueStep(
+      s,
+      prepareQueue(s, src, brokers, false),
+      { reqId: "r1", subscription: "run:s", traceIds: () => [] },
+      {
+        exec: async (req) => (calls.push(req), (t += 500), { kind: "queue.consume", messages: batches.shift() ?? [], skipped: 1 }),
+        cancel: async (id) => void closed.push(id),
+        cancelled: () => false,
+        now: () => t,
+      },
+    );
     expect(out).toMatchObject({ state: "passed", extracted: [{ key: "orderId", value: "o-7" }], seen: 2, skipped: 3 });
     expect(calls.every((c) => c.kind === "queue.consume" && c.id === "run:s")).toBe(true);
     expect(closed).toEqual(["run:s"]);
@@ -296,16 +393,21 @@ describe("queue steps", () => {
     let t = 0;
     const seenIds: string[][] = [];
     const s = consume({ checks: [{ left: "body.status", op: "==", right: '"paid"' }] }, { matchRun: true });
-    const out = await runQueueStep(s, prepareQueue(s, src, brokers, false), { reqId: "r1", traceIds: () => ["abc"] }, {
-      exec: async (req) => {
-        if (req.kind === "queue.consume") seenIds.push(req.traceIds);
-        t += 1000;
-        return { kind: "queue.consume", messages: [msg({ status: "pending" })], skipped: 0 };
+    const out = await runQueueStep(
+      s,
+      prepareQueue(s, src, brokers, false),
+      { reqId: "r1", traceIds: () => ["abc"] },
+      {
+        exec: async (req) => {
+          if (req.kind === "queue.consume") seenIds.push(req.traceIds);
+          t += 1000;
+          return { kind: "queue.consume", messages: [msg({ status: "pending" })], skipped: 0 };
+        },
+        cancel: async () => undefined,
+        cancelled: () => false,
+        now: () => t,
       },
-      cancel: async () => undefined,
-      cancelled: () => false,
-      now: () => t,
-    });
+    );
     expect(out.state).toBe("failed");
     expect(out.checks[0].got).toBe("none within 3s (3 other messages didn't match)");
     expect(seenIds.every((ids) => ids[0] === "abc")).toBe(true);
@@ -332,6 +434,8 @@ describe("queue steps", () => {
     const ctx: ValidateContext = { src, envName: "local", brokers };
     const first = step({ id: "a", url: "http://x", extract: [{ key: "tenant", value: "body.tenant" }] });
     const issues = validateFlow([first, consume({}, { destination: "orders.{{tenant}}" })], ctx);
-    expect(issues.map((i) => [i.level, i.message])).toEqual([["warning", expect.stringContaining("{{tenant}} from an earlier step, so it starts listening only when it's reached")]]);
+    expect(issues.map((i) => [i.level, i.message])).toEqual([
+      ["warning", expect.stringContaining("{{tenant}} from an earlier step, so it starts listening only when it's reached")],
+    ]);
   });
 });

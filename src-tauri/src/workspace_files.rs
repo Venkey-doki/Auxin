@@ -152,9 +152,10 @@ impl FileWatch {
         let root_owned = root.to_string();
         let mut w = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
             if let Ok(ev) = res
-                && ev.paths.iter().any(|p| !p.extension().is_some_and(|e| e == "tmp")) {
-                    let _ = app.emit("auxin://files-changed", &root_owned);
-                }
+                && ev.paths.iter().any(|p| !p.extension().is_some_and(|e| e == "tmp"))
+            {
+                let _ = app.emit("auxin://files-changed", &root_owned);
+            }
         })
         .map_err(|e| e.to_string())?;
         w.watch(&dir, RecursiveMode::Recursive).map_err(|e| e.to_string())?;

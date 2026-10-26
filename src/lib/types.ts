@@ -127,10 +127,4 @@ export interface Runtime {
   error?: string;
 }
 
-export type View =
-  | { type: "overview" }
-  | { type: "service"; id: string }
-  | { type: "group"; id: string }
-  | { type: "flow"; id: string }
-  | { type: "map" };
-
+export type View = { type: "overview" } | { type: "service"; id: string } | { type: "group"; id: string } | { type: "flow"; id: string } | { type: "map" };

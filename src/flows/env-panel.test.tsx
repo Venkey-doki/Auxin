@@ -26,7 +26,11 @@ const nameInputs = () => [...host.querySelectorAll<HTMLInputElement>('section in
 
 function mount(envs: Record<string, ReturnType<typeof parseEnv>>, active = "local") {
   useStore.setState({
-    config: { version: 1, activeWorkspaceId: "w", workspaces: [{ id: "w", root: "/w", name: "w", overrides: {}, manual: [], hidden: [], groups: [], activeEnv: active }] },
+    config: {
+      version: 1,
+      activeWorkspaceId: "w",
+      workspaces: [{ id: "w", root: "/w", name: "w", overrides: {}, manual: [], hidden: [], groups: [], activeEnv: active }],
+    },
     detected: [],
     runtime: {},
   });
@@ -58,7 +62,9 @@ describe("Environment panel", () => {
 
   it("keeps a freshly added blank row until the user fills it in", async () => {
     mount({ local: { ...parseEnv("local"), vars: { region: "EU" } } });
-    const addVar = [...host.querySelectorAll("section")].find((s) => s.textContent?.includes("Variables"))!.querySelector<HTMLButtonElement>("button:not([aria-label])")!;
+    const addVar = [...host.querySelectorAll("section")]
+      .find((s) => s.textContent?.includes("Variables"))!
+      .querySelector<HTMLButtonElement>("button:not([aria-label])")!;
     act(() => addVar.click());
     expect(nameInputs()).toHaveLength(2);
     await wait(450); // past the save debounce

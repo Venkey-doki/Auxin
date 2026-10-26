@@ -33,7 +33,15 @@ export function QueueDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; ste
   const setQ = (p: Partial<QueueSpec>) => patch({ queue: { ...q, ...p } });
   const field = (value: string, onChange: (v: string) => void, label: string, placeholder: string) => (
     <div className="flex min-w-0 flex-1 items-center rounded-md border border-line-strong bg-rail focus-within:border-paper/70">
-      <VarInput value={value} onChange={onChange} src={src} serviceColors={{}} placeholder={placeholder} label={label} onEnter={() => !locked && void sendStep(path, step)} />
+      <VarInput
+        value={value}
+        onChange={onChange}
+        src={src}
+        serviceColors={{}}
+        placeholder={placeholder}
+        label={label}
+        onEnter={() => !locked && void sendStep(path, step)}
+      />
     </div>
   );
 
@@ -67,7 +75,12 @@ export function QueueDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; ste
                   </option>
                 ))}
               </select>
-              {field(q.destination, (destination) => setQ({ destination }), kafka ? "Topic" : "Exchange", kafka ? "topic" : publish ? "exchange (empty: straight to a queue)" : "exchange")}
+              {field(
+                q.destination,
+                (destination) => setQ({ destination }),
+                kafka ? "Topic" : "Exchange",
+                kafka ? "topic" : publish ? "exchange (empty: straight to a queue)" : "exchange",
+              )}
               {busy ? (
                 <Button className="h-8" onClick={() => cancelStep(path, step.id)} disabled={locked}>
                   <Square /> Cancel
@@ -78,7 +91,13 @@ export function QueueDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; ste
                 </Button>
               )}
             </div>
-            {!kafka && field(q.routingKey, (routingKey) => setQ({ routingKey }), publish ? "Routing key" : "Binding", publish ? (q.destination ? "routing key" : "queue name") : "binding pattern, # for everything")}
+            {!kafka &&
+              field(
+                q.routingKey,
+                (routingKey) => setQ({ routingKey }),
+                publish ? "Routing key" : "Binding",
+                publish ? (q.destination ? "routing key" : "queue name") : "binding pattern, # for everything",
+              )}
             {kafka && publish && field(q.key, (key) => setQ({ key }), "Message key", "message key (optional)")}
             <p className="text-xs text-fg-3">
               {!Object.keys(brokers).length
@@ -144,7 +163,9 @@ export function QueueDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; ste
                   <span className="flex-1 text-sm text-fg-2">Only messages from this run</span>
                   <Switch checked={q.matchRun} onChange={() => setQ({ matchRun: !q.matchRun })} label="Only messages from this run" />
                 </div>
-                <span className="-mt-2 text-xs text-fg-3">Needs your services to pass on the traceparent or X-Request-ID header Auxin sends, into the messages they publish.</span>
+                <span className="-mt-2 text-xs text-fg-3">
+                  Needs your services to pass on the traceparent or X-Request-ID header Auxin sends, into the messages they publish.
+                </span>
                 <div className="grid gap-1.5">
                   <div className="flex items-center gap-2 text-sm text-fg-2">
                     Wait up to
@@ -222,7 +243,9 @@ function QueueResult({ step, out, onCancel }: { step: FlowStep; out?: StepOutcom
             <SpanWaterfall spans={out.spans} traceId={out.traceId} />
           </div>
         ) : (
-          <p className="border-t border-line px-4 py-3 text-xs text-fg-3">Services that use OpenTelemetry and pass on the traceparent header show their work here.</p>
+          <p className="border-t border-line px-4 py-3 text-xs text-fg-3">
+            Services that use OpenTelemetry and pass on the traceparent header show their work here.
+          </p>
         )}
       </div>
     );

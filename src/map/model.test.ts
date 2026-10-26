@@ -1,10 +1,44 @@
 import { describe, expect, it } from "vitest";
 import type { Service } from "../lib/types";
-import { addNode, edgeKey, emptyTopology, keepEdge, mergeTopology, parseTopology, removeEdge, removeNode, serializeTopology, type Discovery, type Observation } from "./model";
+import {
+  addNode,
+  edgeKey,
+  emptyTopology,
+  keepEdge,
+  mergeTopology,
+  parseTopology,
+  removeEdge,
+  removeNode,
+  serializeTopology,
+  type Discovery,
+  type Observation,
+} from "./model";
 
 const ROOT = "/w";
 const svc = (name: string, framework: string | null = null): Service =>
-  ({ id: `${ROOT}/${name}`, index: 0, name, path: `${ROOT}/${name}`, kind: "node", framework, command: "", detectedCommand: null, suggestions: [], savedCommands: [], cwd: "", env: [], venv: null, useVenv: false, color: 0, portHint: null, manual: false, otel: false, otelEndpoint: false, spanName: name, sendTraces: false }) as Service;
+  ({
+    id: `${ROOT}/${name}`,
+    index: 0,
+    name,
+    path: `${ROOT}/${name}`,
+    kind: "node",
+    framework,
+    command: "",
+    detectedCommand: null,
+    suggestions: [],
+    savedCommands: [],
+    cwd: "",
+    env: [],
+    venv: null,
+    useVenv: false,
+    color: 0,
+    portHint: null,
+    manual: false,
+    otel: false,
+    otelEndpoint: false,
+    spanName: name,
+    sendTraces: false,
+  }) as Service;
 const ev = (source: "compose" | "env", confidence: "declared" | "inferred") => [{ source, confidence, detail: `${source} file` }];
 const discovery: Discovery = {
   nodes: [{ key: "postgres", kind: "database", label: "postgres", tech: "postgres", endpoint: "localhost:5432", evidence: ev("compose", "declared") }],
@@ -14,7 +48,8 @@ const discovery: Discovery = {
   ],
 };
 const services = [svc("api"), svc("worker"), svc("web", "vite")];
-const merge = (file = emptyTopology(), observed: Observation[] = [], now = Date.parse("2026-10-26T12:00:00Z")) => mergeTopology({ root: ROOT, services, discovery, observed, file, now });
+const merge = (file = emptyTopology(), observed: Observation[] = [], now = Date.parse("2026-10-26T12:00:00Z")) =>
+  mergeTopology({ root: ROOT, services, discovery, observed, file, now });
 const conf = (r: ReturnType<typeof merge>) => Object.fromEntries(r.edges.map((e) => [edgeKey(e), e.confidence]));
 
 describe("mergeTopology", () => {

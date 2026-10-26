@@ -169,7 +169,12 @@ export function evalCheck(c: Check, r: ResponseView): CheckResult {
       }
       break;
     case "length ==": {
-      const len = Array.isArray(g.value) || typeof g.value === "string" ? g.value.length : g.value && typeof g.value === "object" ? Object.keys(g.value).length : undefined;
+      const len =
+        Array.isArray(g.value) || typeof g.value === "string"
+          ? g.value.length
+          : g.value && typeof g.value === "object"
+            ? Object.keys(g.value).length
+            : undefined;
       ok = len !== undefined && len === Number(want);
       return { label, ok, got: len === undefined ? got : `length ${len}` };
     }

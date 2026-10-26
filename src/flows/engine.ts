@@ -76,7 +76,17 @@ export function prepareRequest(step: FlowStep, src: VarSources, injectHeaders: b
     if (!has("traceparent")) finalHeaders.push(["traceparent", ids.traceparent]);
   }
 
-  return { method: step.method, url: url.text, headers: finalHeaders, body, bodyText, missing: [...missing], usedSecrets: [...usedSecrets], requestId: ids?.requestId, traceId: ids?.traceId };
+  return {
+    method: step.method,
+    url: url.text,
+    headers: finalHeaders,
+    body,
+    bodyText,
+    missing: [...missing],
+    usedSecrets: [...usedSecrets],
+    requestId: ids?.requestId,
+    traceId: ids?.traceId,
+  };
 }
 
 /**
@@ -165,20 +175,39 @@ export async function runHttpStep(step: FlowStep, req: PreparedRequest, opts: Ht
 
 /** One attempt: a send, or a poll loop. `sentBefore` keeps send ids unique across attempts. */
 async function sendOnce(step: FlowStep, req: PreparedRequest, opts: HttpStepOptions, deps: HttpStepDeps, sentBefore: number): Promise<HttpStepResult> {
-  const cancelled = (res?: HttpResponse, tries = sentBefore): HttpStepResult => ({ state: "cancelled", error: "Cancelled.", res, tries, checks: [], extracted: [] });
+  const cancelled = (res?: HttpResponse, tries = sentBefore): HttpStepResult => ({
+    state: "cancelled",
+    error: "Cancelled.",
+    res,
+    tries,
+    checks: [],
+    extracted: [],
+  });
   const maxTries = step.poll ? Math.max(1, step.poll.maxTries) : 1;
   let res: HttpResponse | undefined;
   let tries = 0;
   let pollUnmet: CheckResult[] = [];
 
-  for (; tries < maxTries; ) {
+  for (; tries < maxTries;) {
     if (deps.cancelled()) return cancelled(res, sentBefore + tries);
     tries++;
     if (step.poll) deps.onPoll?.({ tries });
     const id = `${opts.reqId}-${sentBefore + tries}`;
     deps.onInflight?.(id);
     try {
-      res = await deps.send({ id, method: req.method, url: req.url, headers: req.headers, body: req.body, timeoutMs: step.timeoutMs, followRedirects: true, insecureTls: opts.insecureTls, cookieJar: opts.jar, root: opts.root, policy: opts.policy });
+      res = await deps.send({
+        id,
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        body: req.body,
+        timeoutMs: step.timeoutMs,
+        followRedirects: true,
+        insecureTls: opts.insecureTls,
+        cookieJar: opts.jar,
+        root: opts.root,
+        policy: opts.policy,
+      });
     } catch (e) {
       deps.onInflight?.(null);
       const msg = String(e);
@@ -206,7 +235,12 @@ async function sendOnce(step: FlowStep, req: PreparedRequest, opts: HttpStepOpti
   const checks = step.checks.filter((c) => c.left.trim()).map((c) => evalCheck(c, view));
   // With no checks of its own, a request fails on an HTTP error status.
   if (!step.checks.some((c) => c.left.trim())) checks.push({ label: "status < 400", ok: res!.status < 400, got: String(res!.status) });
-  if (step.poll && pollUnmet.length) checks.unshift({ label: `poll until ${pollUnmet.map((p) => p.label).join(" and ")}`, ok: false, got: `not met after ${tries} tries (${pollUnmet[0].got})` });
+  if (step.poll && pollUnmet.length)
+    checks.unshift({
+      label: `poll until ${pollUnmet.map((p) => p.label).join(" and ")}`,
+      ok: false,
+      got: `not met after ${tries} tries (${pollUnmet[0].got})`,
+    });
   const extracted: KV[] = [];
   const missingExtract: string[] = [];
   for (const e of step.extract.filter((x) => x.key.trim() && x.value.trim())) {
@@ -247,7 +281,16 @@ export function prepareQueue(step: FlowStep, src: VarSources, brokers: Record<st
   const b = brokers[q.broker];
   const broker = b ? { type: b.type, url: r(b.url) } : undefined;
   const headers: [string, string][] = step.type === "queue.publish" ? q.headers.filter((h) => h.key.trim()).map((h) => [h.key.trim(), r(h.value)]) : [];
-  const out: PreparedQueue = { broker, destination: r(q.destination), routingKey: r(q.routingKey), key: r(q.key), headers, body: step.type === "queue.publish" ? r(q.body) : "", missing: [], usedSecrets: [] };
+  const out: PreparedQueue = {
+    broker,
+    destination: r(q.destination),
+    routingKey: r(q.routingKey),
+    key: r(q.key),
+    headers,
+    body: step.type === "queue.publish" ? r(q.body) : "",
+    missing: [],
+    usedSecrets: [],
+  };
   if (injectHeaders && step.type === "queue.publish") {
     // The same ids as an HTTP request, so a consumer that logs or forwards them can be traced.
     const ids = newTraceIds();
@@ -269,9 +312,12 @@ function queueIssues(s: FlowStep, n: number, ctx: ValidateContext): Issue[] {
   if (!q.broker) return err(`Step ${n} has no broker. Pick one, or add one under Environment.`);
   if (!b) return err(`There's no broker “${q.broker}” in “${ctx.envName}”. Add it under Environment.`);
   if (b.type === "kafka" && !q.destination.trim()) return err(`Step ${n} has no topic.`);
-  if (s.type === "queue.publish" && !q.destination.trim() && !q.routingKey.trim()) return err(`Step ${n} has no exchange or routing key. To send straight to a queue, leave the exchange empty and put the queue name in the routing key.`);
+  if (s.type === "queue.publish" && !q.destination.trim() && !q.routingKey.trim())
+    return err(`Step ${n} has no exchange or routing key. To send straight to a queue, leave the exchange empty and put the queue name in the routing key.`);
   if (s.type === "queue.consume" && b.type === "rabbitmq" && !q.destination.trim())
-    return err(`Step ${n} needs an exchange to listen on. Auxin listens through its own temporary queue, so it can't watch a queue directly without taking messages from your workers.`);
+    return err(
+      `Step ${n} needs an exchange to listen on. Auxin listens through its own temporary queue, so it can't watch a queue directly without taking messages from your workers.`,
+    );
   return [];
 }
 
@@ -318,12 +364,23 @@ const CONSUME_SLICE_MS = 1000;
 export async function runQueueStep(step: FlowStep, prep: PreparedQueue, opts: QueueStepOptions, deps: QueueStepDeps): Promise<QueueStepResult> {
   const q = step.queue!;
   const base = { tries: 1, checks: [] as CheckResult[], extracted: [] as KV[] };
-  const fail = (e: unknown): QueueStepResult => (String(e) === "Cancelled" || deps.cancelled() ? { ...base, state: "cancelled", error: "Cancelled." } : { ...base, state: "error", error: String(e) });
+  const fail = (e: unknown): QueueStepResult =>
+    String(e) === "Cancelled" || deps.cancelled() ? { ...base, state: "cancelled", error: "Cancelled." } : { ...base, state: "error", error: String(e) };
   if (!prep.broker) return { ...base, state: "error", error: `There's no broker “${q.broker}” in this environment.` };
 
   if (step.type === "queue.publish") {
     try {
-      const r = await deps.exec({ kind: "queue.publish", id: opts.reqId, broker: prep.broker, destination: prep.destination, routingKey: prep.routingKey || null, key: prep.key || null, headers: prep.headers, body: prep.body, policy: opts.policy });
+      const r = await deps.exec({
+        kind: "queue.publish",
+        id: opts.reqId,
+        broker: prep.broker,
+        destination: prep.destination,
+        routingKey: prep.routingKey || null,
+        key: prep.key || null,
+        headers: prep.headers,
+        body: prep.body,
+        policy: opts.policy,
+      });
       if (r.kind !== "queue.publish") throw new Error("Unexpected reply");
       return { ...base, state: "passed", published: { ms: r.ms, destination: r.destination, partition: r.partition, offset: r.offset } };
     } catch (e) {
@@ -340,7 +397,16 @@ export async function runQueueStep(step: FlowStep, prep: PreparedQueue, opts: Qu
   try {
     while (!deps.cancelled()) {
       const wait = Math.max(0, Math.min(CONSUME_SLICE_MS, deadline - now()));
-      const r = await deps.exec({ kind: "queue.consume", id: sub, broker: prep.broker, source: prep.destination, binding: prep.routingKey || null, traceIds: q.matchRun ? opts.traceIds() : [], waitMs: wait, policy: opts.policy });
+      const r = await deps.exec({
+        kind: "queue.consume",
+        id: sub,
+        broker: prep.broker,
+        source: prep.destination,
+        binding: prep.routingKey || null,
+        traceIds: q.matchRun ? opts.traceIds() : [],
+        waitMs: wait,
+        policy: opts.policy,
+      });
       if (r.kind !== "queue.consume") throw new Error("Unexpected reply");
       skipped += r.skipped;
       for (const m of r.messages) {
@@ -362,7 +428,9 @@ export async function runQueueStep(step: FlowStep, prep: PreparedQueue, opts: Qu
     }
     if (deps.cancelled()) return { ...base, state: "cancelled", error: "Cancelled.", seen, skipped };
     const where = q.destination || q.routingKey;
-    const other = [seen && `${seen} other message${seen === 1 ? "" : "s"} didn't match`, skipped && `${skipped} from other runs were left out`].filter(Boolean).join("; ");
+    const other = [seen && `${seen} other message${seen === 1 ? "" : "s"} didn't match`, skipped && `${skipped} from other runs were left out`]
+      .filter(Boolean)
+      .join("; ");
     return {
       ...base,
       state: "failed",
@@ -406,7 +474,10 @@ export const PARALLEL_LIMIT = 4;
  * block starts every request in it, even after one fails, and the flow moves
  * on when all have finished.
  */
-export async function runItems<T extends { state: string; res?: HttpResponse; message?: QueueMessage }>(items: FlowItem[], hooks: WalkHooks<T>): Promise<WalkResult<T>> {
+export async function runItems<T extends { state: string; res?: HttpResponse; message?: QueueMessage }>(
+  items: FlowItem[],
+  hooks: WalkHooks<T>,
+): Promise<WalkResult<T>> {
   const outcomes = new Map<string, T>();
   const branches: Record<string, "then" | "else"> = {};
   let failed = false;
@@ -498,7 +569,11 @@ export function validateFlow(items: FlowItem[], ctx: ValidateContext): Issue[] {
     // A run opens its listens when it starts; one that needs an extracted value can only open when it's reached.
     const late = s.type === "queue.consume" ? missing.filter((m) => known.has(m) || maybe.has(m)) : [];
     if (late.length)
-      issues.push({ id: s.id, level: "warning", message: `Step ${num(s.id)} uses ${late.map((m) => `{{${m}}}`).join(", ")} from an earlier step, so it starts listening only when it's reached and can miss a message sent before that.` });
+      issues.push({
+        id: s.id,
+        level: "warning",
+        message: `Step ${num(s.id)} uses ${late.map((m) => `{{${m}}}`).join(", ")} from an earlier step, so it starts listening only when it's reached and can miss a message sent before that.`,
+      });
     for (const m of missing) {
       if (known.has(m)) continue;
       if (maybe.has(m)) {
@@ -526,7 +601,12 @@ export function validateFlow(items: FlowItem[], ctx: ValidateContext): Issue[] {
     } else if (item.type === "if") {
       const prev = items[i - 1];
       if (!prev || !isStep(prev) || prev.type === "queue.publish")
-        issues.push({ id: item.id, level: "error", message: "An if block reads the response (or received message) of the step just before it. Put a request or a wait-for-message step above this block." });
+        issues.push({
+          id: item.id,
+          level: "error",
+          message:
+            "An if block reads the response (or received message) of the step just before it. Put a request or a wait-for-message step above this block.",
+        });
       if (!item.when.some((c) => c.left.trim())) issues.push({ id: item.id, level: "error", message: "This if block has no condition yet." });
       if (!item.then.length && !item.else.length) issues.push({ id: item.id, level: "warning", message: "This if block has no requests yet." });
       for (const lane of [item.then, item.else]) {
@@ -571,7 +651,7 @@ export function redactBody(text: string | null | undefined, secrets: string[]): 
       if (!v || typeof v !== "object") return v;
       return Object.fromEntries(
         Object.entries(v).map(([k, x]) => {
-          if (SENSITIVE_KEY.test(k) && x != null && typeof x !== "object") return (changed = true), [k, HIDDEN];
+          if (SENSITIVE_KEY.test(k) && x != null && typeof x !== "object") return ((changed = true), [k, HIDDEN]);
           return [k, scrub(x)];
         }),
       );

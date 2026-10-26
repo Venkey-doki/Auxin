@@ -4,6 +4,8 @@ node_modules
 package-lock.json
 src-tauri/target
 src-tauri/gen
+# Written by the impeccable design tool in its own style.
+.impeccable
 fixtures/**/node_modules
 # Prose is wrapped by hand.
 *.md

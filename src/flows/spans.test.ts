@@ -20,13 +20,26 @@ const span = (p: Partial<Span> & { spanId: string; service: string }): Span => (
 
 // api receives the request, queries postgres, publishes; the worker consumes in its own trace, linked back.
 const spans: Span[] = [
-  span({ spanId: "api", service: "api", startMs: 100, durationMs: 80, attributes: [["http.request.method", "POST"], ["http.route", "/orders"]] }),
+  span({
+    spanId: "api",
+    service: "api",
+    startMs: 100,
+    durationMs: 80,
+    attributes: [
+      ["http.request.method", "POST"],
+      ["http.route", "/orders"],
+    ],
+  }),
   span({ spanId: "db", parentSpanId: "api", service: "api", kind: "client", startMs: 110, durationMs: 5, attributes: [["db.system", "postgresql"]] }),
   span({ spanId: "pub", parentSpanId: "api", service: "api", kind: "producer", startMs: 120, durationMs: 2 }),
   span({ spanId: "billing", parentSpanId: "api", service: "billing", startMs: 130, durationMs: 30, status: "error" }),
   span({ spanId: "consume", traceId: T2, service: "worker", kind: "consumer", startMs: 150, durationMs: 40, links: [{ traceId: T1, spanId: "pub" }] }),
 ];
-const known: Record<string, { id: string; alias: string }> = { api: { id: "/w/api", alias: "gw" }, billing: { id: "/w/billing", alias: "billing" }, worker: { id: "/w/worker", alias: "worker" } };
+const known: Record<string, { id: string; alias: string }> = {
+  api: { id: "/w/api", alias: "gw" },
+  billing: { id: "/w/billing", alias: "billing" },
+  worker: { id: "/w/worker", alias: "worker" },
+};
 
 describe("spans", () => {
   it("rows nest children under parents, own trace first, linked traces after", () => {

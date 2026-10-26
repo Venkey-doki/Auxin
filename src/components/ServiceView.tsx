@@ -4,7 +4,18 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
 import type { Service } from "../lib/types";
 import { SERVICE_COLORS, shortPath } from "../lib/util";
-import { activeWorkspace, hideService, isLive, removeManualService, resetOverride, restartService, selectServices, setOverride, toast, useStore } from "../state/store";
+import {
+  activeWorkspace,
+  hideService,
+  isLive,
+  removeManualService,
+  resetOverride,
+  restartService,
+  selectServices,
+  setOverride,
+  toast,
+  useStore,
+} from "../state/store";
 import { LogView } from "./LogView";
 import { Ticket } from "./Ticket";
 import { Button, cx, Field, IconButton, inputClass, Seg, SegButton, Switch, TopBar } from "./ui";
@@ -103,12 +114,20 @@ function CommandChips({
                 on ? "border-paper bg-paper font-semibold text-ink" : "border-line-strong bg-surface text-fg-2 hover:bg-surface-3 hover:text-fg",
               )}
             >
-              <button className="h-full px-2.5" aria-pressed={on} title={it.source ? `From ${it.source}. Click to use.` : "Click to use"} onClick={() => onPick(it.command)}>
+              <button
+                className="h-full px-2.5"
+                aria-pressed={on}
+                title={it.source ? `From ${it.source}. Click to use.` : "Click to use"}
+                onClick={() => onPick(it.command)}
+              >
                 {it.command}
               </button>
               {onRemove && (
                 <button
-                  className={cx("grid h-full w-6 place-items-center border-l [&_svg]:size-3", on ? "border-paper-line text-ink-2 hover:text-ink" : "border-line-strong hover:text-bad-soft")}
+                  className={cx(
+                    "grid h-full w-6 place-items-center border-l [&_svg]:size-3",
+                    on ? "border-paper-line text-ink-2 hover:text-ink" : "border-line-strong hover:text-bad-soft",
+                  )}
                   onClick={() => onRemove(it.command)}
                   aria-label={`Remove saved command ${it.command}`}
                   title="Remove from saved"
@@ -180,7 +199,11 @@ function ServiceSettings({ service }: { service: Service }) {
         )}
 
         <Block>
-          <Field label="Start command" htmlFor="cmd" hint="Runs in your login shell from the working folder, so anything that works in your terminal works here.">
+          <Field
+            label="Start command"
+            htmlFor="cmd"
+            hint="Runs in your login shell from the working folder, so anything that works in your terminal works here."
+          >
             <form
               className="flex gap-2"
               onSubmit={(e) => {
@@ -261,7 +284,10 @@ function ServiceSettings({ service }: { service: Service }) {
                   aria-checked={service.color === i}
                   aria-label={`Colour ${i + 1}`}
                   onClick={() => commit({ color: i })}
-                  className={cx("size-5 rounded-full transition-transform hover:scale-110", service.color === i && "ring-2 ring-paper ring-offset-2 ring-offset-bg")}
+                  className={cx(
+                    "size-5 rounded-full transition-transform hover:scale-110",
+                    service.color === i && "ring-2 ring-paper ring-offset-2 ring-offset-bg",
+                  )}
                   style={{ background: c }}
                 />
               ))}
