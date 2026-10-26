@@ -1,0 +1,34 @@
+# Coverage rules for pull requests (https://docs.codecov.com/docs/codecov-yaml).
+# CI uploads coverage/frontend/lcov.info (Vitest) and coverage/rust/lcov.info (cargo-llvm-cov).
+coverage:
+  precision: 2
+  round: down
+  status:
+    # New and changed lines must be 90% covered. A partly taken branch counts against it.
+    patch:
+      default:
+        target: 90%
+    # Overall coverage may not drop below the base branch's (0.1% allows for rounding).
+    project:
+      default:
+        target: auto
+        threshold: 0.1%
+
+component_management:
+  individual_components:
+    - component_id: frontend
+      name: Frontend (TypeScript)
+      paths: ["src/**"]
+    - component_id: backend
+      name: Backend (Rust)
+      paths: ["src-tauri/**"]
+
+ignore:
+  - "src/dev/**"
+  - "src/main.tsx"
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+
+comment:
+  layout: "condensed_header, diff, components, files"
+  require_changes: false

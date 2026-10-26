@@ -14,7 +14,9 @@
     "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "format": "prettier --write . && cargo fmt --manifest-path src-tauri/Cargo.toml",
     "format:check": "prettier --check . && cargo fmt --manifest-path src-tauri/Cargo.toml --check",
-    "prepare": "lefthook install"
+    "prepare": "lefthook install",
+    "test:coverage": "vitest run --coverage",
+    "coverage:rust": "cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lcov --output-path coverage/rust/lcov.info --fail-under-lines 79"
   },
   "dependencies": {
     "@dagrejs/dagre": "3.1.1",
@@ -38,6 +40,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
+    "@vitest/coverage-v8": "^3.2.7",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
