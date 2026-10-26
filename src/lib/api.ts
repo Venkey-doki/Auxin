@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { Discovery } from "../map/model";
 import type { DetectedService } from "./types";
 
 export interface StartSpec {
@@ -91,8 +92,9 @@ export const api = {
   auxinWatch: (root: string) => invoke<void>("auxin_watch", { root }),
   auxinListDir: (root: string, path: string) => invoke<string[]>("auxin_list_dir", { root, path }),
   auxinRead: (root: string, path: string) => invoke<string>("auxin_read", { root, path }),
-  detectDirections: (root: string, services: { alias: string; path: string; port: number | null }[]) =>
-    invoke<{ from: string; to: string; source: "env" | "config" | "code"; evidence: string[] }[]>("detect_directions", { root, services }),
+  /** Infrastructure and links found in the project's files; code is read only when `codeScan` is on. */
+  discoverTopology: (root: string, services: { key: string; path: string; port: number | null }[], codeScan: boolean) =>
+    invoke<Discovery>("discover_topology", { root, services, codeScan }),
   sampleConnections: (groups: [string, number][], portOwner: Record<number, string>) => invoke<[string, string][]>("sample_connections", { groups, portOwner }),
   filePreview: (path: string) => invoke<[string, number]>("file_preview", { path }),
   onFilesChanged: (cb: (root: string) => void) => listen<string>("auxin://files-changed", (e) => cb(e.payload)),

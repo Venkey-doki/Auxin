@@ -70,6 +70,8 @@ export interface Workspace {
   flows?: LegacyFlow[];
   /** Selected environment for request flows (`.auxin/env/<name>.json`). */
   activeEnv?: string;
+  /** You allowed the map to read source code here (off until then; per machine, never in the repo). */
+  codeScan?: boolean;
 }
 
 export interface Config {
@@ -113,5 +115,6 @@ export type View =
   | { type: "overview" }
   | { type: "service"; id: string }
   | { type: "group"; id: string }
-  | { type: "flow"; id: string };
+  | { type: "flow"; id: string }
+  | { type: "map" };
 

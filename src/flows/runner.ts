@@ -8,8 +8,9 @@ import { getLogs } from "../state/logs";
 import { selectServices, toast, useStore } from "../state/store";
 import { mask, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, validateFlow, type Issue } from "./engine";
 import type { CheckResult } from "./eval";
-import { allSteps, DEFAULT_NETWORK, parseFlow, serializeFlow, slugify, type Direction, type FlowDoc, type FlowStep, type KV } from "./model";
-import { activeEnvName, rk, serviceIdFor, servicePorts, updateFlow, useFlows, varSources, write } from "./store";
+import { recordObserved } from "../map/store";
+import { allSteps, DEFAULT_NETWORK, parseFlow, serializeFlow, slugify, type FlowDoc, type FlowStep, type KV } from "./model";
+import { activeEnvName, rk, serviceIdFor, servicePorts, useFlows, varSources, write } from "./store";
 import { computeTrace, correlationValues, isCorrelationValue, type TraceResult, type TraceService } from "./trace";
 
 export type StepState = "queued" | "sending" | "polling" | "passed" | "failed" | "error" | "skipped" | "cancelled";
@@ -205,21 +206,16 @@ function scheduleTrace(doc: FlowDoc, step: FlowStep, o: StepOutcome, requestBody
       ),
     });
     patchOutcome(rk(doc.path, step.id), o.reqId, { tracing: false, trace });
-    if (trace.traffic.length) addDirections(doc.path, trace.traffic.map(([from, to]) => ({ from, to, source: "traffic", evidence: `Seen in a run: ${o.requestId} logged by ${from} then ${to}`, confirmed: false })));
+    observe(doc, trace.traffic, "traffic", (from, to) => `Request ${o.requestId} was logged by ${from}, then by ${to}`);
   })();
   pendingTraces.set(o.reqId, p);
   void p.finally(() => pendingTraces.delete(o.reqId));
 }
 
-/** Adds directions not already present or dismissed (aliases must be in the flow map). */
-export function addDirections(path: string, incoming: Direction[]) {
-  updateFlow(path, (f) => {
-    const aliases = new Set(f.services.map((x) => x.alias));
-    const key = (d: { from: string; to: string }) => `${d.from}→${d.to}`;
-    const have = new Set([...f.directions.map(key), ...f.dismissed.map(key)]);
-    const add = incoming.filter((d) => d.from !== d.to && aliases.has(d.from) && aliases.has(d.to) && !have.has(key(d)) && (have.add(key(d)), true));
-    return add.length ? { ...f, directions: [...f.directions, ...add] } : f;
-  });
+/** Hands links a run showed (by alias) to the project map (by service folder). */
+function observe(doc: FlowDoc, pairs: [string, string][], source: "traffic" | "connection", detail: (from: string, to: string) => string) {
+  const ref = (alias: string) => doc.services.find((f) => f.alias === alias)?.ref;
+  recordObserved(pairs.flatMap(([a, b]) => (ref(a) && ref(b) ? [{ from: ref(a)!, to: ref(b)!, source, detail: detail(a, b) }] : [])));
 }
 
 /* ---------- single send ---------- */
@@ -506,7 +502,7 @@ function startConnectionSampler(path: string): () => void {
           const pairs = await api.sampleConnections(groups, portOwner);
           const fresh = pairs.filter(([a, b]) => !seen.has(`${a}→${b}`));
           fresh.forEach(([a, b]) => seen.add(`${a}→${b}`));
-          if (fresh.length) addDirections(path, fresh.map(([from, to]) => ({ from, to, source: "connection", evidence: `${from} held a TCP connection to ${to}'s port during a run`, confirmed: false })));
+          observe(doc, fresh, "connection", (from, to) => `${from} held a TCP connection to ${to}'s port during a run`);
         } catch {
           stopped = true; // sampling is optional; never break a run over it
         }

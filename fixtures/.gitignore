@@ -1,0 +1,3 @@
+# Fixture env files are test data with dev-only values; the root .gitignore would drop them.
+!.env
+!.env.*

@@ -23,11 +23,13 @@ vi.mock("../lib/api", () => ({
       return () => undefined;
     }),
     sampleConnections: vi.fn(async () => []),
+    discoverTopology: vi.fn(async () => ({ nodes: [], edges: [] })),
     saveConfig: vi.fn(async () => undefined),
   },
 }));
 
 import { api } from "../lib/api";
+import { useMap } from "../map/store";
 import { appendLogs } from "../state/logs";
 import { useStore } from "../state/store";
 import { blankBlock, blankStep, isStep, newFlow, parseEnv, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
@@ -69,6 +71,7 @@ const out = (id: string) => useFlows.getState().responses[rk("flows/e2e.flow.jso
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 beforeEach(() => {
+  useMap.setState({ observed: [] });
   http.sent = [];
   http.writes = [];
   http.disk = [];
@@ -159,7 +162,7 @@ describe("runFlow", () => {
     expect(http.sent.length).toBeLessThan(10);
   });
 
-  it("traces through the services' logs and records traffic directions", async () => {
+  it("traces through the services' logs and records the link it saw", async () => {
     http.handler = async (r) => {
       const rid = r.headers.find(([k]) => k === "X-Request-ID")![1];
       appendLogs([
@@ -179,7 +182,8 @@ describe("runFlow", () => {
     expect(t.lines).toHaveLength(3);
     expect(t.traffic).toEqual([["gw", "model"]]);
     await new Promise((r) => setTimeout(r, 350)); // flow file edits are debounced
-    expect(useFlows.getState().flows[doc.path].directions).toEqual([expect.objectContaining({ from: "gw", to: "model", source: "traffic", confirmed: false })]);
+    // The link the trace showed goes to the project map, by service folder.
+    expect(useMap.getState().observed).toEqual([expect.objectContaining({ from: "gw", to: "model", source: "traffic" })]);
   });
 });
 
@@ -371,5 +375,31 @@ describe("control flow, history and replay", () => {
     await p;
     expect(new Set(cancel.mock.calls.map(([id]) => id)).size).toBe(2);
     expect(useFlows.getState().runs[doc.path].status).toBe("cancelled");
+  });
+});
+
+describe("project map handover", () => {
+  it("moves links kept in an old flow file to topology.json, and writes the flow without them", async () => {
+    useMap.setState({ root: null, file: { version: 1, nodes: [], edges: [], removed: [], positions: {} } });
+    http.disk = [
+      [
+        "flows/old.flow.json",
+        JSON.stringify({
+          version: 1,
+          name: "Old",
+          services: [{ ref: "gw", alias: "gateway" }, { ref: "model", alias: "model" }],
+          directions: [{ from: "gateway", to: "model", source: "env", evidence: "x", confirmed: true }, { from: "model", to: "gateway", source: "code", evidence: "y", confirmed: false }],
+          dismissed: [{ from: "model", to: "gateway" }],
+          steps: [],
+        }),
+      ],
+    ];
+    await syncWorkspace(null);
+    await syncWorkspace(ROOT);
+    await sleep(400);
+    expect(useMap.getState().file).toMatchObject({ edges: [{ from: "gw", to: "model" }], removed: ["model→gw"] });
+    const flow = http.writes.filter(([p]) => p === "flows/old.flow.json").slice(-1)[0];
+    expect(JSON.parse(flow[1])).not.toHaveProperty("directions");
+    expect(http.writes.some(([p, t]) => p === "topology.json" && t.includes('"from": "gw"'))).toBe(true);
   });
 });

@@ -5,6 +5,7 @@ mod netpolicy;
 mod process;
 mod scan;
 mod steps;
+mod topology;
 mod workspace_files;
 
 use process::{Manager, StartSpec};
@@ -67,8 +68,8 @@ fn auxin_read(root: String, path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn detect_directions(root: String, services: Vec<deps::ServiceInfo>) -> Vec<deps::DetectedEdge> {
-    tauri::async_runtime::spawn_blocking(move || deps::scan_dependencies(std::path::Path::new(&root), &services)).await.unwrap_or_default()
+async fn discover_topology(root: String, services: Vec<topology::ServiceRef>, code_scan: bool) -> topology::Discovery {
+    tauri::async_runtime::spawn_blocking(move || topology::discover(std::path::Path::new(&root), &services, code_scan)).await.unwrap_or_default()
 }
 
 #[tauri::command]
@@ -195,7 +196,7 @@ pub fn run() {
             file_preview,
             auxin_list_dir,
             auxin_read,
-            detect_directions,
+            discover_topology,
             sample_connections
         ])
         .build(tauri::generate_context!())

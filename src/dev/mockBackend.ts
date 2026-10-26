@@ -249,11 +249,31 @@ export function installMockBackend() {
         case "auxin_read":
           if (!files.has(a.path)) throw `No such file: ${a.path}`;
           return files.get(a.path);
-        case "detect_directions":
-          return [
-            { from: "api-gateway", to: "auth-service", source: "env", evidence: ["api-gateway/.env:4  AUTH_URL=http://localhost:3001"] },
-            { from: "auth-service", to: "billing-worker", source: "config", evidence: ['auth-service/config/default.json:12  "billing": "http://localhost:8081"'] },
-          ].filter((e) => a.services.some((x: { alias: string }) => x.alias === e.from) && a.services.some((x: { alias: string }) => x.alias === e.to));
+        case "discover_topology": {
+          const ev = (source: string, confidence: string, detail: string) => [{ source, confidence, detail }];
+          const keys = new Set(a.services.map((x: { key: string }) => x.key));
+          const edges = [
+            { from: "api-gateway", to: "auth-service", kind: "http", evidence: ev("env", "inferred", "api-gateway/.env:4  AUTH_URL=http://localhost:3001") },
+            { from: "auth-service", to: "billing-worker", kind: "http", evidence: ev("config", "inferred", 'auth-service/config/default.json:12  "billing": "http://localhost:8081"') },
+            { from: "api-gateway", to: "postgres", kind: "database", evidence: ev("compose", "declared", "docker-compose.yml:9  depends_on: [postgres]") },
+            { from: "db-migrations", to: "postgres", kind: "database", evidence: ev("env", "inferred", "db-migrations/.env:1  DATABASE_URL=postgres://••••@localhost:5432/app") },
+            { from: "billing-worker", to: "rabbitmq", kind: "queue", evidence: ev("compose", "declared", "docker-compose.yml:21  depends_on: [rabbitmq]") },
+            { from: "queue-router", to: "rabbitmq", kind: "queue", evidence: ev("env", "inferred", "queue-router/.env:2  AMQP_URL=amqp://••••@localhost:5672") },
+            { from: "pricing-model", to: "redis", kind: "cache", evidence: ev("config", "inferred", "pricing-model/settings.py:14  REDIS_URL = \"redis://localhost:6379\"") },
+            { from: "billing-worker", to: "ext:api.stripe.com", kind: "http", evidence: ev("env", "inferred", "billing-worker/.env:5  STRIPE_URL=https://api.stripe.com") },
+          ];
+          return {
+            nodes: [
+              { key: "postgres", kind: "database", label: "postgres", tech: "postgres", endpoint: "localhost:5432", evidence: ev("compose", "declared", "docker-compose.yml:30  image: postgres:16") },
+              { key: "rabbitmq", kind: "queue", label: "rabbitmq", tech: "rabbitmq", endpoint: "localhost:5672", evidence: ev("compose", "declared", "docker-compose.yml:36  image: rabbitmq:3-management") },
+              { key: "redis@localhost:6379", kind: "cache", label: "redis", tech: "redis", endpoint: "localhost:6379", evidence: ev("config", "inferred", "pricing-model/settings.py:14") },
+              { key: "ext:api.stripe.com", kind: "external", label: "api.stripe.com", tech: null, endpoint: "api.stripe.com:443", evidence: ev("env", "inferred", "billing-worker/.env:5") },
+            ],
+            edges: edges
+              .map((e) => (e.to === "redis" ? { ...e, to: "redis@localhost:6379" } : e))
+              .filter((e) => keys.has(e.from) && (keys.has(e.to) || ["postgres", "rabbitmq", "redis@localhost:6379", "ext:api.stripe.com"].includes(e.to))),
+          };
+        }
         case "sample_connections":
           return [];
         case "load_config":

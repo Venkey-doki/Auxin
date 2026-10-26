@@ -101,8 +101,10 @@ describe("flow file: extract, checks, poll, map", () => {
     expect(out.steps.filter(isStep)[0].checks).toEqual([{ left: "status", op: "==", right: 200 }, { left: "body.ok", op: "exists" }]);
     expect(out.steps[0].wait.until).toEqual([{ left: "body.status", op: "==", right: "done" }]);
     expect(out.steps.filter(isStep)[0].extract).toEqual({ result: "body.result" });
-    expect(out.dismissed).toEqual([{ from: "model", to: "gw" }]);
-    expect(out.directions[0].evidence).toBe("gateway/.env:3  X=1");
+    // Links moved to the project map: read once for the handover, never written back.
+    expect(doc.legacyLinks).toEqual({ kept: [{ from: "gw", to: "model" }], dismissed: [{ from: "model", to: "gw" }] });
+    expect(out).not.toHaveProperty("directions");
+    expect(out).not.toHaveProperty("dismissed");
   });
 });
 

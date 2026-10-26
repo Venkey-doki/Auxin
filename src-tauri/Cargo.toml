@@ -28,6 +28,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 notify = "8"
 base64 = "0.22"
 tokio = { version = "1", features = ["sync"] }
+serde_yaml_ng = "0.10"
 
 
 [dev-dependencies]

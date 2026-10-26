@@ -9,6 +9,7 @@ import { activeWorkspace, navigate, selectServices, toast, updateActiveWorkspace
 import { allSteps, mapSteps, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow, slugify, type EnvDoc, type FlowDoc, type FlowStep } from "./model";
 import type { FlowRunState, StepOutcome } from "./runner";
 import type { VarSources } from "./vars";
+import { loadTopology } from "../map/store";
 
 interface FlowsState {
   root: string | null;
@@ -119,6 +120,7 @@ async function reload(root: string, external = false) {
     }
   }
   set({ flows, broken, envs, loaded: true });
+  void loadTopology(root);
   if (external && Object.keys(broken).length) toast("error", "A file in .auxin couldn't be read", Object.entries(broken).map(([p, m]) => `${p}: ${m}`).join("\n"));
 }
 

@@ -1,0 +1,27 @@
+# Test fixture for topology discovery (src-tauri/src/topology.rs). Dev-only credentials.
+services:
+  api:
+    build: ./api
+    ports:
+      - "4000:4000"
+    depends_on:
+      - postgres
+      - rabbitmq
+    environment:
+      - DATABASE_URL=postgres://app:devpass@postgres:5432/app
+  worker:
+    build:
+      context: ./worker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+  postgres:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: devpass
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - 5672:5672

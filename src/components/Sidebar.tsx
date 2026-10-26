@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { Check, ChevronsUpDown, Eye, PanelLeftClose, FolderOpen, FolderPlus, LayoutPanelLeft, Play, Plus, RefreshCw, Rows3, Search, Square, Trash2, Workflow } from "lucide-react";
+import { Check, ChevronsUpDown, Eye, PanelLeftClose, FolderOpen, FolderPlus, LayoutPanelLeft, Network, Play, Plus, RefreshCw, Rows3, Search, Square, Trash2, Workflow } from "lucide-react";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import type { Service } from "../lib/types";
 import { MOD, SERVICE_COLORS, shortPath } from "../lib/util";
@@ -83,6 +83,14 @@ export function Sidebar() {
             {liveCount > 0 && <span className="pr-1.5 font-mono text-sm text-ok tabular-nums">{liveCount}</span>}
           </button>
         </div>
+        {ws && (
+          <div className={cx(rowBase, view.type === "map" && rowActive)}>
+            <button className={mainBtn} onClick={() => navigate({ type: "map" })}>
+              <Network className="size-4 flex-none text-fg-3" aria-hidden />
+              <span className="flex-1 truncate font-medium">Map</span>
+            </button>
+          </div>
+        )}
 
         {ws && (
           <>

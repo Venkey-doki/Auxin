@@ -7,6 +7,7 @@ import { ServiceView } from "./components/ServiceView";
 import { Sidebar } from "./components/Sidebar";
 import { IconButton } from "./components/ui";
 import { FlowScreen } from "./flows/FlowScreen";
+import { MapScreen } from "./map/MapScreen";
 import { initFlowsSync } from "./flows/store";
 import { boot, dismissToast, navigate, selectServices, setPalette, toggleSidebar, useStore } from "./state/store";
 
@@ -60,6 +61,7 @@ export default function App() {
           {view.type === "service" && <ServiceView id={view.id} />}
           {view.type === "group" && <GroupView id={view.id} />}
           {view.type === "flow" && <FlowScreen path={view.id} />}
+          {view.type === "map" && <MapScreen />}
         </Boundary>
       </main>
       <CommandPalette />

@@ -29,7 +29,7 @@ pub struct DetectedEdge {
     pub evidence: Vec<String>,
 }
 
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     "node_modules", ".git", "venv", ".venv", "dist", "build", "target", "coverage", "__pycache__", ".next", ".turbo", "out",
     "vendor",
 ];
@@ -41,12 +41,12 @@ const CODE_EXTS: &[&str] = &["js", "mjs", "cjs", "ts", "tsx", "jsx", "py", "go",
 const CONFIG_EXTS: &[&str] = &["toml", "ini", "json", "yml", "yaml"];
 
 /// Hosts that mean "this machine", so the port alone identifies the callee.
-const LOCAL_HOSTS: &[&str] = &["localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"];
+pub(crate) const LOCAL_HOSTS: &[&str] = &["localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"];
 
-const MAX_FILE_BYTES: u64 = 512 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 512 * 1024;
 const MAX_FILES: usize = 5_000;
 const MAX_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
-const BINARY_PROBE: usize = 8 * 1024;
+pub(crate) const BINARY_PROBE: usize = 8 * 1024;
 const MAX_EVIDENCE: usize = 3;
 const MAX_SNIPPET: usize = 160;
 
@@ -118,6 +118,8 @@ struct Walk<'a> {
     root: &'a Path,
     from: usize,
     tables: &'a Tables,
+    /// False skips `Source::Code` files without reading them.
+    include_code: bool,
     /// Other services' folders; nested ones are not ours to scan.
     other_roots: Vec<PathBuf>,
     files: usize,
@@ -125,7 +127,7 @@ struct Walk<'a> {
     edges: Vec<EdgeAcc>,
 }
 
-pub fn scan_dependencies(root: &Path, services: &[ServiceInfo]) -> Vec<DetectedEdge> {
+pub fn scan_dependencies(root: &Path, services: &[ServiceInfo], include_code: bool) -> Vec<DetectedEdge> {
     let tables = Tables::new(services);
     let mut out = Vec::new();
     for (from, svc) in services.iter().enumerate() {
@@ -134,6 +136,7 @@ pub fn scan_dependencies(root: &Path, services: &[ServiceInfo]) -> Vec<DetectedE
             root,
             from,
             tables: &tables,
+            include_code,
             other_roots: services.iter().enumerate().filter(|(i, _)| *i != from).map(|(_, s)| PathBuf::from(&s.path)).collect(),
             files: 0,
             bytes: 0,
@@ -184,6 +187,9 @@ impl Walk<'_> {
 
     fn file(&mut self, path: &Path, svc_root: &Path) {
         let Some(source) = classify(path, svc_root) else { return };
+        if source == Source::Code && !self.include_code {
+            return;
+        }
         let Ok(meta) = fs::metadata(path) else { return };
         if meta.len() > MAX_FILE_BYTES {
             return;
@@ -269,13 +275,14 @@ fn is_compose_file(path: &Path) -> bool {
 }
 
 /// Path relative to the workspace root with `/` separators (falls back to the full path).
-fn rel_path(root: &Path, path: &Path) -> String {
+pub(crate) fn rel_path(root: &Path, path: &Path) -> String {
     let rel = path.strip_prefix(root).unwrap_or(path);
     rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
 }
 
-fn snippet(line: &str) -> String {
-    line.trim().chars().take(MAX_SNIPPET).collect()
+/// Trimmed, redacted (before truncation, so a cut never exposes a secret) and capped line.
+pub(crate) fn snippet(line: &str) -> String {
+    crate::topology::redact(line.trim()).chars().take(MAX_SNIPPET).collect()
 }
 
 /// Finds `host:port` references line by line.
@@ -297,7 +304,7 @@ fn scan_text(text: &str, source: Source, is_compose: bool, tables: &Tables) -> V
     hits
 }
 
-fn is_host_byte(b: u8) -> bool {
+pub(crate) fn is_host_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_')
 }
 
@@ -412,7 +419,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let services = pair(dir.path());
         write(dir.path(), "web/.env", "# API_URL=http://localhost:8000\nAPI_URL=http://localhost:8000/v1\n");
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         // The commented-out line is not evidence.
         assert_eq!(got, vec![edge("web", "api", "env", &["web/.env:2  API_URL=http://localhost:8000/v1"])]);
     }
@@ -427,7 +434,7 @@ mod tests {
             "web/docker-compose.yml",
             "services:\n  web:\n    image: api:5\n    environment:\n      - BACKEND=http://API:5000/graphql\n",
         );
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         assert_eq!(got, vec![edge("web", "api", "env", &["web/docker-compose.yml:5  - BACKEND=http://API:5000/graphql"])]);
     }
 
@@ -436,7 +443,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let services = vec![svc(dir.path(), "web", "web", None), svc(dir.path(), "Orders API", "orders-svc", Some(9000))];
         write(dir.path(), "web/.env", "ORDERS=http://orders-svc:1234\n");
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         assert_eq!(got.len(), 1);
         assert_eq!((got[0].from.as_str(), got[0].to.as_str()), ("web", "Orders API"));
     }
@@ -448,7 +455,7 @@ mod tests {
         write(dir.path(), "web/proxy.config.json", "{\n  \"/api\": \"http://localhost:8081\"\n}\n");
         let mut services = services;
         services[1].port = Some(8081);
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         assert_eq!(got, vec![edge("web", "api", "config", &["web/proxy.config.json:2  \"/api\": \"http://localhost:8081\""])]);
     }
 
@@ -457,7 +464,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let services = pair(dir.path());
         write(dir.path(), "web/src/client.ts", "const base = 'http://127.0.0.1:8000';\nfetch(base + '/x');\n");
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         assert_eq!(got, vec![edge("web", "api", "code", &["web/src/client.ts:1  const base = 'http://127.0.0.1:8000';"])]);
     }
 
@@ -466,7 +473,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let services = pair(dir.path());
         write(dir.path(), "web/.env.local", "export API_HOST=\"localhost\"\nOTHER=1\nAPI_PORT=8000\n");
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         assert_eq!(got.len(), 1);
         assert_eq!((got[0].from.as_str(), got[0].to.as_str(), got[0].source.as_str()), ("web", "api", "env"));
         assert_eq!(got[0].evidence, vec!["web/.env.local:1  export API_HOST=\"localhost\"  API_PORT=8000"]);
@@ -477,7 +484,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let services = pair(dir.path());
         write(dir.path(), "web/.env", "A_URL=http://localhost\nA_PORT=8000\nB_HOST=localhost\nC_PORT=8000\n");
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].evidence.len(), 1, "only the A pair matches");
     }
@@ -490,7 +497,7 @@ mod tests {
         write(dir.path(), "web/dist/app.js", "fetch('http://localhost:8000')");
         write(dir.path(), "web/pyenv/pyvenv.cfg", "home = /usr/bin\n");
         write(dir.path(), "web/pyenv/lib/x.py", "URL = 'http://localhost:8000'");
-        assert!(scan_dependencies(dir.path(), &services).is_empty());
+        assert!(scan_dependencies(dir.path(), &services, true).is_empty());
     }
 
     #[test]
@@ -500,7 +507,7 @@ mod tests {
         write(dir.path(), "web/a.js", "\0\0 http://localhost:8000");
         let big = format!("// http://localhost:8000\n{}", "x".repeat(MAX_FILE_BYTES as usize));
         write(dir.path(), "web/b.js", &big);
-        assert!(scan_dependencies(dir.path(), &services).is_empty());
+        assert!(scan_dependencies(dir.path(), &services, true).is_empty());
     }
 
     #[test]
@@ -509,7 +516,7 @@ mod tests {
         let mut services = vec![svc(dir.path(), "mono", "mono", None), svc(dir.path(), "api", "mono/apps/api", Some(8000))];
         services.push(svc(dir.path(), "web", "mono/apps/web", Some(3000)));
         write(dir.path(), "mono/apps/web/.env", "API=http://localhost:8000\n");
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].from, "web");
     }
@@ -520,7 +527,7 @@ mod tests {
         let services = pair(dir.path());
         write(dir.path(), "api/.env", "SELF=http://localhost:8000\nPORT=8000\n");
         write(dir.path(), "api/src/main.ts", "app.listen(8000); // http://api:8000\n");
-        assert!(scan_dependencies(dir.path(), &services).is_empty());
+        assert!(scan_dependencies(dir.path(), &services, true).is_empty());
     }
 
     #[test]
@@ -528,7 +535,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let services = pair(dir.path());
         write(dir.path(), "web/.env", "DB=postgres://localhost:5432/x\nCACHE=http://localhost:70000\nT=localhost:8000x\n");
-        assert!(scan_dependencies(dir.path(), &services).is_empty());
+        assert!(scan_dependencies(dir.path(), &services, true).is_empty());
     }
 
     #[test]
@@ -537,7 +544,7 @@ mod tests {
         let services = pair(dir.path());
         let long = format!("const u = 'http://localhost:8000'; // {}", "y".repeat(300));
         write(dir.path(), "web/src/lib/api/client.ts", &format!("\n\n    {long}\n"));
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         let ev = &got[0].evidence[0];
         assert!(ev.starts_with("web/src/lib/api/client.ts:3  const u = 'http://localhost:8000';"), "{ev}");
         let snippet = ev.split_once("  ").unwrap().1;
@@ -551,7 +558,7 @@ mod tests {
         for name in ["a", "b", "c", "d", "e"] {
             write(dir.path(), &format!("web/src/{name}.js"), "x('http://localhost:8000');\n");
         }
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         assert_eq!(got.len(), 1);
         let files: Vec<&str> = got[0].evidence.iter().map(|e| e.split(':').next().unwrap()).collect();
         assert_eq!(files, ["web/src/a.js", "web/src/b.js", "web/src/c.js"]);
@@ -569,7 +576,7 @@ mod tests {
         // auth is only referenced from config and code → config wins.
         write(dir.path(), "web/settings.json", "{\"auth\": \"localhost:9000\"}\n");
         write(dir.path(), "web/b.ts", "x('localhost:9000');\n");
-        let got = scan_dependencies(dir.path(), &services);
+        let got = scan_dependencies(dir.path(), &services, true);
         let web_api = got.iter().filter(|e| e.from == "web" && e.to == "api").collect::<Vec<_>>();
         assert_eq!(web_api.len(), 1, "one edge per (from, to)");
         assert_eq!(web_api[0].source, "env");
@@ -591,7 +598,7 @@ mod real_world {
             .into_iter()
             .map(|s| super::ServiceInfo { alias: s.name, path: s.path, port: s.port_hint })
             .collect();
-        for e in super::scan_dependencies(std::path::Path::new(&root), &services) {
+        for e in super::scan_dependencies(std::path::Path::new(&root), &services, true) {
             println!("{} -> {} [{}]\n    {}", e.from, e.to, e.source, e.evidence.join("\n    "));
         }
     }

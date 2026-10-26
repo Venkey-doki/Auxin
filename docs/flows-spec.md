@@ -39,10 +39,6 @@ It must work for any project:
     { "ref": "api-gateway", "alias": "api-gateway", "x": 0, "y": 0 },
     { "ref": "orders-service", "alias": "orders", "x": 288, "y": 53 }
   ],
-  "directions": [
-    { "from": "api-gateway", "to": "orders", "source": "env",
-      "evidence": "api-gateway/.env: ORDERS_URL=http://localhost:8000", "confirmed": true }
-  ],
   "trace": { "injectHeaders": true, "graceMs": 1500 },
   "steps": [
     {
@@ -143,6 +139,8 @@ This is a deliberately small JSONPath subset. A non-JSON body is addressable onl
 **Single-step send:** Send runs one step using the variables extracted by the latest run. It warns if a needed variable has never been extracted.
 
 ## 4. Direction detection
+
+> **Superseded (P2):** links between services now live on the project map, not in each flow. See [map.md](map.md). Flow files no longer have `directions` or `dismissed`; an old file's links are handed to `.auxin/topology.json` once on load. The port table (§4.1) and connection sampling (§4.4) still apply; what they and traces observe goes to the map.
 
 Goal: when services are added to a flow, the canvas already shows plausible arrows, each with its evidence. Everything is editable. Nothing is a black box.
 

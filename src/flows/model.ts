@@ -100,8 +100,6 @@ export type FlowItem = FlowStep | FlowBlock;
 /** Where requests live: the top level, or one lane of a block (`steps` for a parallel block). */
 export type Lane = { block: null } | { block: string; lane: "then" | "else" | "steps" };
 
-export type DirectionSource = "env" | "config" | "code" | "traffic" | "connection" | "manual";
-
 export interface FlowService {
   /** Folder path relative to the workspace root. */
   ref: string;
@@ -111,12 +109,15 @@ export interface FlowService {
   y?: number;
 }
 
-export interface Direction {
-  from: string;
-  to: string;
-  source: DirectionSource;
-  evidence: string;
-  confirmed: boolean;
+/**
+ * Links between services used to be stored in each flow (`directions`,
+ * `dismissed`, by alias). They now live on the project map; a file that still
+ * has them hands them over once, and they aren't written back.
+ */
+export interface LegacyLinks {
+  /** Links that were confirmed or added by hand. */
+  kept: { from: string; to: string }[];
+  dismissed: { from: string; to: string }[];
 }
 
 export interface FlowDoc {
@@ -125,9 +126,8 @@ export interface FlowDoc {
   name: string;
   steps: FlowItem[];
   services: FlowService[];
-  directions: Direction[];
-  /** Directions the user removed; detection never re-adds these. */
-  dismissed: { from: string; to: string }[];
+  /** Set only when the file still had links in it (see LegacyLinks). */
+  legacyLinks?: LegacyLinks;
   injectHeaders: boolean;
   graceMs: number;
   /** Top-level fields this version doesn't know, preserved. */
@@ -342,15 +342,21 @@ export function parseFlow(path: string, text: string): FlowDoc {
     services: (Array.isArray(raw.services) ? raw.services : [])
       .filter((x: Record<string, unknown>) => x && typeof x.ref === "string")
       .map((x: Record<string, unknown>) => ({ ref: String(x.ref), alias: String(x.alias ?? String(x.ref).split("/").pop()), ...(typeof x.x === "number" ? { x: x.x } : {}), ...(typeof x.y === "number" ? { y: x.y } : {}) })),
-    directions: (Array.isArray(raw.directions) ? raw.directions : [])
-      .filter((d: Record<string, unknown>) => d && typeof d.from === "string" && typeof d.to === "string")
-      .map((d: Record<string, unknown>) => ({ from: String(d.from), to: String(d.to), source: String(d.source ?? "manual") as DirectionSource, evidence: String(d.evidence ?? ""), confirmed: d.confirmed !== false })),
-    dismissed: (Array.isArray(raw.dismissed) ? raw.dismissed : []).filter((d: Record<string, unknown>) => d && typeof d.from === "string").map((d: Record<string, unknown>) => ({ from: String(d.from), to: String(d.to) })),
+    ...legacyLinks(raw),
     steps: objects(raw.steps).map(parseItem),
   };
 }
 
 const objects = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object") : []);
+
+function legacyLinks(raw: Record<string, unknown>): { legacyLinks?: LegacyLinks } {
+  const pairs = (v: unknown) => objects(v).filter((d) => typeof d.from === "string" && typeof d.to === "string");
+  const kept = pairs(raw.directions)
+    .filter((d) => d.confirmed !== false)
+    .map((d) => ({ from: String(d.from), to: String(d.to) }));
+  const dismissed = pairs(raw.dismissed).map((d) => ({ from: String(d.from), to: String(d.to) }));
+  return kept.length || dismissed.length ? { legacyLinks: { kept, dismissed } } : {};
+}
 
 function parseItem(raw: Record<string, unknown>): FlowItem {
   const base = { id: String(raw.id ?? newStepId()), rest: pick(raw, BLOCK_KEYS) };
@@ -433,8 +439,6 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
     name: doc.name,
     ...doc.rest,
     services: doc.services,
-    directions: doc.directions,
-    dismissed: doc.dismissed,
     trace: { injectHeaders: doc.injectHeaders, graceMs: doc.graceMs },
     steps,
   };
@@ -442,7 +446,7 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
 }
 
 export function newFlow(path: string, name: string): FlowDoc {
-  return { path, name, steps: [], services: [], directions: [], dismissed: [], injectHeaders: true, graceMs: 1500, rest: {} };
+  return { path, name, steps: [], services: [], injectHeaders: true, graceMs: 1500, rest: {} };
 }
 
 export function parseEnv(name: string, shared?: string, secret?: string): EnvDoc {

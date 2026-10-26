@@ -9,7 +9,8 @@ A desktop app for running a stack of local microservices from one window, instea
   - paste a curl or build a request; `{{service-name}}` resolves to the service's address, `{{token}}`-style secrets live in a git-ignored file;
   - extract values from a response (`body.jobId`) into later requests, add checks (`status == 202`), and poll until a condition holds;
   - every request is traced through your services' logs (Auxin adds `X-Request-ID` / `traceparent` and also matches ids like job ids), shown as a waterfall of hops plus the matching lines;
-  - an n8n-style map of the flow's services, with call directions detected from env/config/code, traces and live connections;
+  - an n8n-style map of the flow's services, with links from the project map (docker-compose, .env, Kubernetes and config files, code when allowed, traces and live connections);
+  - a project Map of every service and the databases, caches, queues and outside APIs they use (docs/map.md);
   - run history with per-request comparisons against the previous run (`.auxin/runs/`, git-ignored).
 - **Logs**: follow-tail with a "N new" jump pill, a filter, an errors-only toggle, timestamps, wrap, ANSI colours, and stdin input for the selected service.
 - **No orphans**: every service runs in its own process group. Stop kills the whole tree (SIGTERM, then SIGKILL after 5 s), and quitting Auxin stops everything.
