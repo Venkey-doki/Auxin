@@ -16,7 +16,7 @@
     "format:check": "prettier --check . && cargo fmt --manifest-path src-tauri/Cargo.toml --check",
     "prepare": "lefthook install",
     "test:coverage": "vitest run --coverage",
-    "coverage:rust": "cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lcov --output-path coverage/rust/lcov.info --fail-under-lines 79"
+    "coverage:rust": "node -e \"require('fs').mkdirSync('coverage/rust',{recursive:true})\" && cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lcov --output-path coverage/rust/lcov.info --fail-under-lines 79"
   },
   "dependencies": {
     "@dagrejs/dagre": "3.1.1",
