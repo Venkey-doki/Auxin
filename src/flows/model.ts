@@ -191,6 +191,12 @@ export interface EnvDoc {
   secrets: Record<string, string>;
 }
 
+/**
+ * Where the flow schema is written in each project, relative to `.auxin/`. Flow
+ * files point at it relatively, so editors can check them offline.
+ */
+export const FLOW_SCHEMA_PATH = "schema/flow-2.json";
+
 const FLOW_KEYS = ["$schema", "version", "name", "steps", "trace", "services", "directions", "dismissed"];
 const STEP_KEYS = ["id", "type", "name", "http", "queue", "method", "url", "headers", "body", "timeoutMs", "extract", "checks", "wait", "poll", "retry", "onFailure"];
 const BLOCK_KEYS = ["id", "type", "name", "when", "then", "else", "steps"];
@@ -560,7 +566,7 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
         : { id: i.id, type: "parallel", name: i.name, steps: i.steps.map(stepOut), ...i.rest },
   );
   const out = {
-    $schema: "https://auxin.dev/schema/flow-2.json",
+    $schema: `../${FLOW_SCHEMA_PATH}`,
     version: 2,
     name: doc.name,
     ...doc.rest,

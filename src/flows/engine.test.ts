@@ -219,6 +219,11 @@ describe("blocks in flow files", () => {
     expect(allSteps(doc.steps)[0].restIn).toEqual({ http: { proxy: "p:1" }, body: { encoding: "gzip" }, wait: { jitter: true } });
   });
 
+  it("points at the project's own schema, also in files that named the old address", () => {
+    const old = JSON.stringify({ $schema: "https://auxin.dev/schema/flow-2.json", version: 2, name: "Old", steps: [] });
+    expect(JSON.parse(serializeFlow(parseFlow("flows/old.flow.json", old)).text).$schema).toBe("../schema/flow-2.json");
+  });
+
   it("moves requests between lanes, but never puts a block inside a block", () => {
     const [a, b] = ids("a", "b");
     const items: FlowItem[] = [a, iff({ id: "if1", then: [b] }), par({ id: "p1" })];

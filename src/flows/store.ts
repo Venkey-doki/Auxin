@@ -6,7 +6,8 @@ import { confirm } from "@tauri-apps/plugin-dialog";
 import { create } from "zustand";
 import { api } from "../lib/api";
 import { activeWorkspace, navigate, selectServices, toast, updateActiveWorkspace, useStore } from "../state/store";
-import { allSteps, mapSteps, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow, slugify, type EnvDoc, type FlowDoc, type FlowStep } from "./model";
+import flowSchema from "./flow-2.schema.json";
+import { allSteps, FLOW_SCHEMA_PATH, mapSteps, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow, slugify, type EnvDoc, type FlowDoc, type FlowStep } from "./model";
 import type { FlowRunState, StepOutcome } from "./runner";
 import type { VarSources } from "./vars";
 import { flushMap, loadTopology } from "../map/store";
@@ -169,9 +170,26 @@ export function flowList(s: FlowsState = get()): FlowDoc[] {
   return Object.values(s.flows).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+const FLOW_SCHEMA_TEXT = JSON.stringify(flowSchema, null, 2) + "\n";
+/** Projects whose schema file is known to match this version of Auxin. */
+const schemaChecked = new Set<string>();
+
+/**
+ * Writes the flow schema into a project that has flows, once per session and
+ * only when it differs, so a newer Auxin updates it and an unchanged one leaves it be.
+ */
+async function ensureSchema(root: string) {
+  if (schemaChecked.has(root)) return;
+  schemaChecked.add(root);
+  const current = await api.auxinRead(root, FLOW_SCHEMA_PATH).catch(() => null);
+  if (current === FLOW_SCHEMA_TEXT) return;
+  await api.auxinWrite(root, FLOW_SCHEMA_PATH, FLOW_SCHEMA_TEXT).catch(() => schemaChecked.delete(root));
+}
+
 export function write(path: string, text: string) {
   const root = get().root;
   if (!root) return Promise.resolve();
+  if (path.startsWith("flows/")) void ensureSchema(root);
   lastWritten.set(path, text);
   pending.add(path);
   inflightWrites.set(path, (inflightWrites.get(path) ?? 0) + 1);
@@ -190,6 +208,7 @@ export function write(path: string, text: string) {
 /** Writes a file into a workspace's `.auxin`, whether it's the open one or not. */
 export function writeTo(root: string, path: string, text: string) {
   if (get().root === root) return write(path, text);
+  if (path.startsWith("flows/")) void ensureSchema(root);
   return api.auxinWrite(root, path, text).catch((e) => toast("error", `Couldn't save ${path}`, String(e)));
 }
 

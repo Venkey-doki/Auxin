@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auxin flow",
+  "description": "A flow file (.auxin/flows/*.flow.json): requests and message steps run in order against your local services. Auxin writes this schema into each project so editors can check flow files offline. Fields Auxin doesn't know are kept when it saves.",
+  "type": "object",
+  "required": ["version", "name", "steps"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 2 },
+    "name": { "type": "string", "description": "Shown in the sidebar and run history." },
+    "services": {
+      "type": "array",
+      "description": "Services the flow uses. Their alias is a variable: {{alias}} is the service's base URL.",
+      "items": {
+        "type": "object",
+        "required": ["ref"],
+        "properties": {
+          "ref": { "type": "string", "description": "The service's folder, relative to the workspace." },
+          "alias": { "type": "string" },
+          "x": { "type": "number" },
+          "y": { "type": "number" }
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "properties": {
+        "injectHeaders": { "type": "boolean", "default": true, "description": "Add X-Request-ID and traceparent to every request and published message." },
+        "graceMs": { "type": "number", "minimum": 0, "default": 1500, "description": "How long to wait after a step for log lines and spans." }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "oneOf": [{ "$ref": "#/$defs/httpStep" }, { "$ref": "#/$defs/publishStep" }, { "$ref": "#/$defs/consumeStep" }, { "$ref": "#/$defs/ifBlock" }, { "$ref": "#/$defs/parallelBlock" }]
+      }
+    }
+  },
+  "$defs": {
+    "stringMap": { "type": "object", "additionalProperties": { "type": "string" } },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["left", "op"],
+        "properties": {
+          "left": { "type": "string", "description": "status, time, body.<path>, or header.<name>." },
+          "op": { "enum": ["==", "!=", "<", "<=", ">", ">=", "contains", "matches", "exists", "!exists", "length =="] },
+          "right": { "description": "The value to compare with. Not used by exists and !exists." }
+        }
+      }
+    },
+    "extract": {
+      "$ref": "#/$defs/stringMap",
+      "description": "Variable name → path in the response or message, e.g. \"orderId\": \"body.id\"."
+    },
+    "onFailure": {
+      "enum": ["stop", "continue"],
+      "default": "stop",
+      "description": "After this step fails: stop the flow, or carry on (the run is still marked failed)."
+    },
+    "stepBase": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      }
+    },
+    "httpStep": {
+      "allOf": [{ "$ref": "#/$defs/stepBase" }],
+      "properties": {
+        "type": { "const": "http" },
+        "http": {
+          "type": "object",
+          "required": ["method", "url"],
+          "properties": {
+            "method": { "type": "string", "examples": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+            "url": { "type": "string", "description": "May use {{variables}}, e.g. {{api}}/orders/{{orderId}}." },
+            "headers": { "$ref": "#/$defs/stringMap" },
+            "body": {
+              "description": "One of json, jsonText, text, form or file; or null for no body.",
+              "oneOf": [
+                { "type": "null" },
+                { "type": "object", "required": ["json"], "properties": { "json": {} } },
+                { "type": "object", "required": ["jsonText"], "properties": { "jsonText": { "type": "string", "description": "JSON with unquoted {{variables}} in it, kept as text." } } },
+                { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } },
+                { "type": "object", "required": ["form"], "properties": { "form": { "$ref": "#/$defs/stringMap" } } },
+                { "type": "object", "required": ["file"], "properties": { "file": { "type": "string", "description": "Relative to the workspace. Files outside it, and secret or git files, are refused." } } }
+              ]
+            },
+            "timeoutMs": { "type": "number", "minimum": 0, "default": 30000 }
+          }
+        },
+        "extract": { "$ref": "#/$defs/extract" },
+        "checks": { "$ref": "#/$defs/checks" },
+        "wait": {
+          "type": "object",
+          "description": "Re-send until these checks pass.",
+          "properties": {
+            "until": { "$ref": "#/$defs/checks" },
+            "everyMs": { "type": "number", "minimum": 0, "default": 1000 },
+            "maxTries": { "type": "number", "minimum": 1, "default": 30 }
+          }
+        },
+        "retry": {
+          "type": "object",
+          "properties": {
+            "max": { "type": "integer", "minimum": 1, "maximum": 5 },
+            "backoffMs": { "type": "number", "minimum": 0, "default": 500 },
+            "on": { "enum": ["errors", "any"], "description": "errors: no response or 5xx. any: also failed checks." }
+          }
+        },
+        "onFailure": { "$ref": "#/$defs/onFailure" }
+      }
+    },
+    "publishStep": {
+      "allOf": [{ "$ref": "#/$defs/stepBase" }],
+      "properties": {
+        "type": { "const": "queue.publish" },
+        "queue": {
+          "type": "object",
+          "required": ["broker"],
+          "properties": {
+            "broker": { "type": "string", "description": "A broker named in the environment (brokers)." },
+            "destination": { "type": "string", "description": "RabbitMQ exchange (\"\" is the default exchange) or Kafka topic." },
+            "routingKey": { "type": "string" },
+            "key": { "type": "string", "description": "Kafka message key." },
+            "headers": { "$ref": "#/$defs/stringMap" },
+            "body": { "type": "string" }
+          }
+        },
+        "onFailure": { "$ref": "#/$defs/onFailure" }
+      }
+    },
+    "consumeStep": {
+      "allOf": [{ "$ref": "#/$defs/stepBase" }],
+      "properties": {
+        "type": { "const": "queue.consume" },
+        "queue": {
+          "type": "object",
+          "required": ["broker"],
+          "properties": {
+            "broker": { "type": "string", "description": "A broker named in the environment (brokers)." },
+            "destination": { "type": "string", "description": "RabbitMQ exchange or Kafka topic to listen on." },
+            "routingKey": { "type": "string", "description": "RabbitMQ binding pattern; # takes everything.", "default": "#" },
+            "matchRun": { "type": "boolean", "default": false, "description": "Only messages carrying a trace or request id from this run." },
+            "timeoutMs": { "type": "number", "minimum": 0, "default": 15000 }
+          }
+        },
+        "extract": { "$ref": "#/$defs/extract" },
+        "checks": { "$ref": "#/$defs/checks" },
+        "onFailure": { "$ref": "#/$defs/onFailure" }
+      }
+    },
+    "laneStep": {
+      "oneOf": [{ "$ref": "#/$defs/httpStep" }, { "$ref": "#/$defs/publishStep" }, { "$ref": "#/$defs/consumeStep" }]
+    },
+    "ifBlock": {
+      "type": "object",
+      "required": ["id", "type"],
+      "description": "Runs then when every condition holds on the previous step's response (or message), else otherwise.",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "const": "if" },
+        "name": { "type": "string" },
+        "when": { "$ref": "#/$defs/checks" },
+        "then": { "type": "array", "items": { "$ref": "#/$defs/laneStep" } },
+        "else": { "type": "array", "items": { "$ref": "#/$defs/laneStep" } }
+      }
+    },
+    "parallelBlock": {
+      "type": "object",
+      "required": ["id", "type"],
+      "description": "Sends its steps at once, at most 4 in flight.",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "const": "parallel" },
+        "name": { "type": "string" },
+        "steps": { "type": "array", "items": { "$ref": "#/$defs/laneStep" } }
+      }
+    }
+  }
+}

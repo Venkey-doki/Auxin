@@ -34,7 +34,8 @@ import { appendLogs } from "../state/logs";
 import { useStore } from "../state/store";
 import { blankBlock, blankQueueStep, blankStep, isStep, newFlow, parseEnv, serializeFlow, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
 import { cancelRun, cancelStep, replayRun, runFlow, sendStep } from "./runner";
-import { activeEnvName, createFlow, rk, saveEnv, saveEnvIn, sliceOf, syncWorkspace, updateFlow, useFlows } from "./store";
+import flowSchema from "./flow-2.schema.json";
+import { activeEnvName, createFlow, rk, saveEnv, saveEnvIn, sliceOf, syncWorkspace, updateFlow, useFlows, writeTo } from "./store";
 
 const ROOT = "/w";
 const res = (status: number, body: unknown, extra: Partial<HttpResponse> = {}): HttpResponse => {
@@ -620,5 +621,27 @@ describe("environment files that can't be read", () => {
     await createFlow("Fresh");
     await saveEnv(parseEnv("local"));
     expect(http.writes.map(([p]) => p)).toEqual(["flows/fresh.flow.json"]);
+  });
+});
+
+describe("the flow schema in each project", () => {
+  const schemaWrites = (root: string) => vi.mocked(api.auxinWrite).mock.calls.filter(([r, p]) => r === root && p === "schema/flow-2.json");
+
+  it("is written with the first flow saved, then left alone, and updated when it differs", async () => {
+    setup([]);
+    vi.mocked(api.auxinWrite).mockClear();
+    await writeTo("/fresh", "flows/a.flow.json", "{}");
+    await writeTo("/fresh", "flows/b.flow.json", "{}");
+    await sleep(0);
+    expect(schemaWrites("/fresh")).toHaveLength(1);
+    expect(JSON.parse(schemaWrites("/fresh")[0][2])).toEqual(flowSchema);
+
+    // Already up to date: not rewritten. Env files alone don't write it.
+    vi.mocked(api.auxinRead).mockImplementationOnce(async () => schemaWrites("/fresh")[0][2]);
+    await writeTo("/current", "flows/a.flow.json", "{}");
+    await writeTo("/noflows", "env/local.json", "{}");
+    await sleep(0);
+    expect(schemaWrites("/current")).toHaveLength(0);
+    expect(schemaWrites("/noflows")).toHaveLength(0);
   });
 });

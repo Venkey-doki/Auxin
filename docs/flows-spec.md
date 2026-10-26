@@ -22,6 +22,7 @@ It must work for any project:
 | Secrets (tokens, keys) | `<workspace>/.auxin/env/<name>.secret.json` | **no**: Auxin adds `.auxin/env/*.secret.json` and `.auxin/runs/` to `<workspace>/.gitignore` the first time it writes a secret or run |
 | Run history (last 30 runs per flow) | `<workspace>/.auxin/runs/<slug>/<timestamp>.json` | no |
 | Canvas layout (node positions) | inside the flow file | yes |
+| Flow schema (for editors) | `<workspace>/.auxin/schema/flow-2.json` | yes |
 
 - Paths inside flow files are relative to the workspace root, so a teammate's checkout in a different folder works unchanged.
 - A service is referred to by its folder path relative to the root (e.g. `api-gateway`). It is never referred to by its absolute path, which is today's internal service id.
@@ -32,7 +33,7 @@ It must work for any project:
 
 ```json
 {
-  "$schema": "https://auxin.dev/schema/flow-2.json",
+  "$schema": "../schema/flow-2.json",
   "version": 2,
   "name": "Checkout end to end",
   "services": [
@@ -69,6 +70,7 @@ It must work for any project:
   - `{ "file": "relative/path" }`: relative to the workspace. A file outside it (absolute path, `..`, or a symlink out) is refused, because flow files can come from someone else's repo. So are files that hold secrets or git data, wherever they are in the workspace: `.env` and `.env.*`, anything under `.git`, `.ssh` or `.auxin/env`, and `*.secret.json`.
   - `null`
 - `headers` is an ordered object. Duplicate header names are not supported in v1.
+- `$schema` points at `.auxin/schema/flow-2.json`, a JSON Schema Auxin writes into the project when it first saves a flow there (and rewrites when a newer Auxin has a different one; source: `src/flows/flow-2.schema.json`). Editors such as VS Code use it to check and autocomplete flow files offline; nothing is fetched from the internet. Auxin itself ignores `$schema` when reading, so files written by older versions (which named `https://auxin.dev/…`) are updated the next time they're saved.
 - Fields this version doesn't know are kept as they are when Auxin saves the file: on the flow, on a step or block, and inside a step's `http`, `http.body`, `wait` and `queue`.
 - A step can also have:
   - `retry: { "max": 1–5, "backoffMs": 500, "on": "errors" | "any" }`: re-send after a pause that doubles each time (±20% jitter, capped at 30 s). `errors` covers no response (refused, timed out) and 5xx; `any` also covers failed checks and a poll that never matched.
