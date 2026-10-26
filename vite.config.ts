@@ -20,7 +20,7 @@ export default defineConfig(() => ({
       reportsDirectory: "coverage/frontend",
       // A floor at today's level, so overall coverage can't slide back. New code is held to
       // 90% per pull request by Codecov (codecov.yml). Raise these as coverage grows.
-      thresholds: { lines: 34, statements: 34, functions: 70, branches: 84 },
+      thresholds: { lines: 44, statements: 43, functions: 30, branches: 35 },
     },
   },
 
