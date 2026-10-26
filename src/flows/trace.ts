@@ -51,6 +51,8 @@ export interface TraceResult {
   unavailable: string[];
   /** A→B pairs seen through the injected request id (for traffic directions). */
   traffic: [string, string][];
+  /** `otel` when the hops come from spans (measured); otherwise they come from log lines. */
+  source?: "otel" | "logs";
 }
 
 const ERROR_RE = /\b(error|exception|traceback|fatal|panic|unhandled)\b/i;

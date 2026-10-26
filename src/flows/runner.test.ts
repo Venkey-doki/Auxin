@@ -434,3 +434,27 @@ describe("queue steps in a run", () => {
     expect(useFlows.getState().runs[doc.path].status).toBe("passed");
   });
 });
+
+describe("OpenTelemetry spans", () => {
+  it("a step's spans replace log hops with measured ones and add links to the map", async () => {
+    useStore.setState({ otel: { port: 4318, fallback: false, error: null, spans: 2 } });
+    useMap.setState({ observed: [] });
+    let asked: string[] = [];
+    vi.mocked(api).otelSpans = vi.fn(async (ids: string[]) => {
+      asked = ids;
+      const base = { parentSpanId: null, kind: "server" as const, status: "unset" as const, statusMessage: null, attributes: [], links: [] };
+      return [
+        { ...base, traceId: ids[0], spanId: "s1", name: "POST /jobs", service: "gw", startMs: 1, durationMs: 40 },
+        { ...base, traceId: ids[0], spanId: "s2", parentSpanId: "s1", name: "score", service: "model", startMs: 5, durationMs: 30, status: "error" as const },
+      ];
+    }) as never;
+    http.handler = async () => res(200, {});
+    const doc = setup([step({ id: "a", url: "{{gw}}/jobs" })], { services: [{ ref: "gw", alias: "gateway" }, { ref: "model", alias: "model" }], graceMs: 5 });
+    await runFlow(doc.path);
+    expect(asked).toEqual([out("a").traceId]);
+    expect(out("a").trace).toMatchObject({ source: "otel", hops: [{ alias: "gateway", ms: 40, ok: true, approx: false }, { alias: "model", ms: 30, ok: false }] });
+    expect(out("a").spans).toHaveLength(2);
+    expect(useMap.getState().observed).toEqual([expect.objectContaining({ from: "gw", to: "model", source: "otel" })]);
+    useStore.setState({ otel: null });
+  });
+});

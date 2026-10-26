@@ -27,10 +27,16 @@ libc = "0.2.191"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "cookies"] }
 notify = "8"
 base64 = "0.22"
-tokio = { version = "1", features = ["sync", "time"] }
+tokio = { version = "1", features = ["sync", "time", "net"] }
 serde_yaml_ng = "0.10"
 lapin = { version = "=4.12.1", default-features = false, features = ["tokio", "rustls--ring", "rustls-platform-verifier"] }
 rskafka = "=0.6.0"
+hyper = { version = "1.12.0", features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+http-body-util = "0.1.5"
+flate2 = "1.1.10"
+prost = "0.14.4"
+opentelemetry-proto = { version = "0.33.1", default-features = false, features = ["gen-tonic-messages", "trace", "with-serde"] }
 
 
 [dev-dependencies]

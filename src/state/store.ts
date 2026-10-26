@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { api } from "../lib/api";
+import { api, type OtelStatus } from "../lib/api";
 import type {
   Config,
   DetectedService,
@@ -33,6 +33,8 @@ interface State {
   toasts: Toast[];
   paletteOpen: boolean;
   sidebarCollapsed: boolean;
+  /** The OpenTelemetry receiver, once known. */
+  otel: OtelStatus | null;
 }
 
 const EMPTY: Config = { version: 1, workspaces: [], activeWorkspaceId: null };
@@ -48,6 +50,7 @@ export const useStore = create<State>(() => ({
   toasts: [],
   paletteOpen: false,
   sidebarCollapsed: readPref("auxin.sidebarCollapsed") === "1",
+  otel: null,
 }));
 
 function readPref(key: string): string | null {
@@ -102,6 +105,8 @@ export function selectServices(s: State): Service[] {
         color: o.color ?? hashColor(d.id),
         portHint: d.portHint ?? o.lastPort ?? portFromCommand(o.command ?? d.defaultCommand ?? ""),
         manual: ws.manual.some((m) => m.id === d.id),
+        otel: d.otel === true,
+        sendTraces: o.otel ?? d.otel === true,
       };
     });
   return cacheVal;
@@ -209,6 +214,11 @@ function migrateLegacyFlows(config: Config): Config {
 }
 
 export async function boot() {
+  // The receiver starts with the app; a missing one (older backend, browser preview) just means no spans.
+  void api
+    .otelStatus()
+    .then((otel) => set({ otel }))
+    .catch(() => undefined);
   try {
     const raw = await api.loadConfig();
     if (raw) {
@@ -362,7 +372,8 @@ export async function startService(id: string): Promise<boolean> {
   }
   set((s) => ({ runtime: { ...s.runtime, [id]: { ...s.runtime[id], status: "starting", startedAt: Date.now(), code: undefined, error: undefined, port: undefined } } }));
   try {
-    await api.start({ id, command: svc.command, cwd: svc.cwd, env: svc.env, venv: svc.useVenv ? svc.venv : null });
+    const port = svc.sendTraces ? get().otel?.port : null;
+    await api.start({ id, command: svc.command, cwd: svc.cwd, env: withOtelEnv(svc.env, svc.name, port ?? null), venv: svc.useVenv ? svc.venv : null });
     return true;
   } catch (e) {
     const msg = String(e);
@@ -371,6 +382,20 @@ export async function startService(id: string): Promise<boolean> {
     toast("error", `Couldn't start ${svc.name}`, msg);
     return false;
   }
+}
+
+/**
+ * Points a service's OpenTelemetry exporter at Auxin's receiver. These are the
+ * standard variables every SDK reads; anything the service sets itself wins.
+ */
+export function withOtelEnv(env: [string, string][], name: string, port: number | null): [string, string][] {
+  if (!port) return env;
+  const add: [string, string][] = [
+    ["OTEL_EXPORTER_OTLP_ENDPOINT", `http://127.0.0.1:${port}`],
+    ["OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf"],
+    ["OTEL_SERVICE_NAME", name],
+  ];
+  return [...env, ...add.filter(([k]) => !env.some(([x]) => x === k))];
 }
 
 export async function stopService(id: string) {

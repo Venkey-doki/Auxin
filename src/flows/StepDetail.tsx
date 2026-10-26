@@ -15,6 +15,7 @@ import { selectServices, startService, toast, useStore } from "../state/store";
 import { allSteps, CHECK_OPS, outsideWorkspace, type BodyKind, type Check, type CheckOp, type FlowDoc, type FlowStep } from "./model";
 import { formatBytes, formatMs, Json, KVTable, METHOD_COLOR, METHODS, Tabs, VarInput } from "./parts";
 import { QueueDetail } from "./QueueDetail";
+import { SpanWaterfall } from "./SpanWaterfall";
 import { cancelStep, sendStep, type StepOutcome } from "./runner";
 import { rk, serviceIdFor, updateStep, useFlows, varSources } from "./store";
 import type { TraceLine } from "./trace";
@@ -602,7 +603,7 @@ function ResponsePanel({ doc, out, notTaken, onCancel }: { doc: FlowDoc; out?: S
       )}
       <Tabs
         tabs={[
-          { id: "trace", label: "Trace", count: out.trace?.lines.length, dot: badHop },
+          { id: "trace", label: "Trace", count: out.spans?.length || out.trace?.lines.length, dot: badHop },
           { id: "body", label: "Response" },
           { id: "headers", label: "Headers", count: r.headers.length },
           { id: "request", label: "Request" },
@@ -689,6 +690,18 @@ function TraceView({ out, injected }: { out: StepOutcome; injected: boolean }) {
           ))}
         </div>
       )}
+      {out.spans?.length ? (
+        <>
+          <div className="flex items-center gap-2 px-4 pt-2.5 pb-1 text-xs text-fg-3">
+            <span className="font-semibold tracking-wider uppercase">Spans</span>
+            <span>
+              {out.spans.length} from OpenTelemetry · timings are measured
+            </span>
+          </div>
+          <SpanWaterfall spans={out.spans} traceId={out.traceId} />
+          <div className="px-4 pt-2.5 pb-0.5 text-xs font-semibold tracking-wider text-fg-3 uppercase">Log lines</div>
+        </>
+      ) : null}
       {lines.length ? (
         <div className="py-1.5 font-mono text-sm leading-[18px] select-text">
           {lines.map((l, i) => (

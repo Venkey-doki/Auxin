@@ -90,7 +90,7 @@ const SCHEMES: &[(&str, &str, &str, Option<u16>)] = &[
 const KAFKA: (&str, &str, &str, Option<u16>) = ("kafka", "queue", "kafka", Some(9092));
 
 const SECRET_WORDS: &[&str] = &["PASSWORD", "PASSWD", "SECRET", "TOKEN", "API_KEY", "APIKEY", "PRIVATE_KEY", "CREDENTIAL"];
-const MASK: &str = "••••••";
+pub(crate) const MASK: &str = "••••••";
 
 pub fn discover(root: &Path, services: &[ServiceRef], code_scan: bool) -> Discovery {
     let mut g = Graph {

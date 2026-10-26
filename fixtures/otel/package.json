@@ -1,0 +1,9 @@
+{
+  "name": "auxin-otel-fixture",
+  "private": true,
+  "description": "Two services instrumented with the real OpenTelemetry Node SDK, for the ignored test `otel::tests::real_node_sdk_spans`. Run `npm ci` here first.",
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/auto-instrumentations-node": "0.81.0"
+  }
+}

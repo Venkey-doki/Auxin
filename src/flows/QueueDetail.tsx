@@ -10,6 +10,7 @@ import type { QueueMessage } from "../lib/api";
 import type { FlowDoc, FlowStep, QueueSpec } from "./model";
 import { formatBytes, formatMs, Json, KVTable, Tabs, VarInput } from "./parts";
 import { cancelStep, sendStep, type StepOutcome } from "./runner";
+import { SpanWaterfall } from "./SpanWaterfall";
 import { ChecksEditor, HeaderList, inlineInput, OnFailureEditor } from "./StepDetail";
 import { activeEnvName, rk, updateStep, useFlows, varSources } from "./store";
 
@@ -203,15 +204,27 @@ function QueueResult({ step, out, onCancel }: { step: FlowStep; out?: StepOutcom
     );
   if (out.state === "error" || out.state === "cancelled") return center(<span className="max-w-[440px] text-sm text-bad-soft select-text">{out.error}</span>);
   if (publish && out.published)
-    return center(
-      <span className="grid justify-items-center gap-1.5">
-        <span className="rounded bg-ok/15 px-2 py-0.5 font-mono text-sm font-semibold text-ok">published</span>
-        <span className="font-mono text-sm text-fg-2">
-          {out.published.destination || "default exchange"} · {formatMs(out.published.ms)}
-          {out.published.partition != null && ` · partition ${out.published.partition}`}
-          {out.published.offset != null && ` · offset ${out.published.offset}`}
-        </span>
-      </span>,
+    return (
+      <div className="flex min-w-0 flex-col">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pt-3 pb-2.5">
+          <span className="rounded bg-ok/15 px-2 py-0.5 font-mono text-sm font-semibold text-ok">published</span>
+          <span className="font-mono text-sm text-fg-2">
+            {out.published.destination || "default exchange"} · {formatMs(out.published.ms)}
+            {out.published.partition != null && ` · partition ${out.published.partition}`}
+            {out.published.offset != null && ` · offset ${out.published.offset}`}
+          </span>
+        </div>
+        {out.spans?.length ? (
+          <div className="border-t border-line">
+            <div className="px-4 pt-2.5 pb-1 text-xs text-fg-3">
+              <span className="font-semibold tracking-wider uppercase">Spans</span> · what your services did with it, from OpenTelemetry
+            </div>
+            <SpanWaterfall spans={out.spans} traceId={out.traceId} />
+          </div>
+        ) : (
+          <p className="border-t border-line px-4 py-3 text-xs text-fg-3">Services that use OpenTelemetry and pass on the traceparent header show their work here.</p>
+        )}
+      </div>
     );
   if (!out.message)
     return (

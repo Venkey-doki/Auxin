@@ -127,6 +127,7 @@ function CommandChips({
 function ServiceSettings({ service }: { service: Service }) {
   const live = useStore((s) => isLive(s.runtime[service.id]));
   const override = useStore((s) => activeWorkspace(s)?.overrides[service.id]);
+  const otel = useStore((s) => s.otel);
   const [command, setCommand] = useState(service.command);
   const [dirty, setDirty] = useState(false);
 
@@ -277,6 +278,19 @@ function ServiceSettings({ service }: { service: Service }) {
             <Switch checked={service.useVenv} onChange={() => commit({ useVenv: !service.useVenv })} label="Use Python virtualenv" />
           </Block>
         )}
+
+        <Block className="grid-cols-[1fr_auto] items-center">
+          <div className="grid gap-1">
+            <span className="text-sm font-semibold text-fg-2">Send OpenTelemetry traces to Auxin</span>
+            <span className="text-sm text-fg-3">
+              {otel?.port
+                ? `${service.otel ? "Uses an OpenTelemetry SDK." : "No OpenTelemetry SDK found in its dependencies; turn this on if it has one."} When on, Auxin starts it with OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:${otel.port}, so flows show its spans. Its own OTEL_* variables win.`
+                : (otel?.error ?? "Auxin's trace receiver isn't running.")}
+              {otel?.fallback && " Port 4318 is used by another program, so only services Auxin starts reach it."}
+            </span>
+          </div>
+          <Switch checked={service.sendTraces} onChange={() => commit({ otel: !service.sendTraces })} label="Send OpenTelemetry traces to Auxin" />
+        </Block>
 
         <Block>
           <div className="grid gap-1">

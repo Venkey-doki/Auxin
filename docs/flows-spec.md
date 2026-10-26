@@ -204,6 +204,16 @@ While a flow runs, Auxin runs `lsof -a -p <pid> -iTCP -sTCP:ESTABLISHED -n -P` e
 
 ## 5. Tracing
 
+### 5.0 OpenTelemetry spans (when services send them)
+
+Auxin has a built-in OTLP/HTTP trace receiver on `127.0.0.1:4318` (traces only; metrics and logs are accepted and dropped). If another program already has 4318 (say your own Jaeger or collector), it uses `4319`, and only services Auxin starts reach it.
+
+- **No code change for services that already use an OpenTelemetry SDK.** Auxin detects one from the service's dependencies (`@opentelemetry/*`, `opentelemetry` in Python requirements, `go.opentelemetry.io`, `io.opentelemetry`, .NET `OpenTelemetry`). When it starts such a service it sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:<port>`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` and `OTEL_SERVICE_NAME=<service name>`; anything the service sets itself wins. A per-service switch (*Send OpenTelemetry traces to Auxin*) turns this on or off; it can also be turned on for a service Auxin didn't detect.
+- Each request (and each published message) already carries a `traceparent`, so an instrumented service continues that trace. After the grace period, Auxin asks the receiver for the step's trace **and traces linked to it** (a queue consumer's span links back to the producer's), and shows them as a waterfall under the step. Their hops replace the log-line hops on the map, with measured timings.
+- Links the spans prove (a parent span in one service, a child in another; a consumer linked to a producer) go to the project map as *Seen in OpenTelemetry spans*.
+- Services without an SDK still show up through log lines (§5.1–5.4), marked approximate. Adding zero-code instrumentation (`NODE_OPTIONS=--require @opentelemetry/auto-instrumentations-node/register`, `opentelemetry-instrument python …`) is a change to the start command you make yourself.
+- Not supported: OTLP over gRPC (4317), and services Auxin doesn't start (Docker containers, services started elsewhere), unless they're already configured to export to Auxin's port.
+
 ### 5.1 Tagging the request
 
 Every request Auxin sends gets `X-Request-ID: aux-<8 hex>` and a W3C `traceparent` header. Many frameworks log or forward these: Express/Nest middleware, FastAPI/Starlette, Spring, Go chi, OpenTelemetry. Both can be turned off per flow (`trace.injectHeaders`) for services that reject unknown headers.

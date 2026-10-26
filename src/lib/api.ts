@@ -59,6 +59,31 @@ export interface QueueMessage {
   receivedAt: number;
 }
 
+/** A span received from a service's OpenTelemetry SDK. Times are ms since the epoch. */
+export interface Span {
+  traceId: string;
+  spanId: string;
+  parentSpanId: string | null;
+  name: string;
+  kind: "unspecified" | "internal" | "server" | "client" | "producer" | "consumer";
+  service: string;
+  startMs: number;
+  durationMs: number;
+  status: "unset" | "ok" | "error";
+  statusMessage: string | null;
+  attributes: [string, string][];
+  links: { traceId: string; spanId: string }[];
+}
+
+/** The built-in OTLP/HTTP receiver: its port, or why it isn't running. */
+export interface OtelStatus {
+  port: number | null;
+  /** On 4319 because something else (another collector) has 4318. */
+  fallback: boolean;
+  error: string | null;
+  spans: number;
+}
+
 /** What `step_exec` takes: one variant per step kind. */
 export type StepRequest =
   | ({ kind: "http" } & HttpRequest)
@@ -113,6 +138,9 @@ export const api = {
   httpSend: (req: HttpRequest) => invoke<HttpResponse>("step_exec", { req: { kind: "http", ...req } }),
   httpCancel: (id: string) => invoke<boolean>("step_cancel", { id }),
   stepExec: (req: StepRequest) => invoke<StepResult>("step_exec", { req }),
+  otelStatus: () => invoke<OtelStatus>("otel_status"),
+  /** Spans of these traces, plus traces linked to them (a queue consumer's, say). */
+  otelSpans: (traceIds: string[]) => invoke<Span[]>("otel_spans", { traceIds }),
   /** Aborts an in-flight step, and closes a consume subscription with this id. */
   stepCancel: (id: string) => invoke<boolean>("step_cancel", { id }),
   httpDropJar: (id: string) => invoke<void>("http_drop_jar", { id }),

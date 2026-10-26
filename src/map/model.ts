@@ -13,7 +13,7 @@ import type { Service } from "../lib/types";
 
 export type NodeKind = "service" | "frontend" | "database" | "cache" | "queue" | "external";
 export type EdgeKind = "http" | "database" | "cache" | "queue" | "other";
-export type SourceKind = "compose" | "env" | "config" | "k8s" | "code" | "traffic" | "connection" | "manual";
+export type SourceKind = "compose" | "env" | "config" | "k8s" | "code" | "traffic" | "connection" | "otel" | "manual";
 /** How sure we are a link exists, strongest first. */
 export type Confidence = "manual" | "declared" | "observed" | "inferred";
 export const CONFIDENCE_ORDER: Confidence[] = ["manual", "declared", "observed", "inferred"];
@@ -36,7 +36,7 @@ export interface Discovery {
 export interface Observation {
   from: string;
   to: string;
-  source: "traffic" | "connection";
+  source: "traffic" | "connection" | "otel";
   detail: string;
   lastSeen: string;
 }

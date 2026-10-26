@@ -139,10 +139,6 @@ const files = new Map<string, string>([
 const polls = new Map<string, number>();
 const downstream: Record<string, string[]> = { "api-gateway": ["auth-service"], "auth-service": ["billing-worker"], "billing-worker": [] };
 
-/**
- * Answers like a running dev server: logs the request (with the X-Request-ID it
- * received) and "forwards" it downstream so the trace has hops. Refuses when stopped.
- */
 /** An in-memory broker: every subscription on a destination gets a copy of what's published there. */
 type MockMsg = { source: string; routingKey: string | null; headers: [string, string][]; bodyText: string; bodyBase64: null; size: number; receivedAt: number };
 const subs = new Map<string, { source: string; buffer: MockMsg[] }>();
@@ -163,6 +159,26 @@ async function fakeConsume(req: { id: string; source: string; waitMs: number }) 
   return { kind: "queue.consume", messages: sub.buffer.splice(0), skipped: 0 };
 }
 
+/** Spans an instrumented stack would send: the called service, then each service it calls. */
+type MockSpan = { traceId: string; spanId: string; parentSpanId: string | null; name: string; kind: string; service: string; startMs: number; durationMs: number; status: string; statusMessage: null; attributes: [string, string][]; links: [] };
+const spans = new Map<string, MockSpan[]>();
+const hex = (n: number) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+
+function recordSpans(traceId: string, parent: string, service: string, method: string, path: string) {
+  const t = Date.now();
+  const root: MockSpan = { traceId, spanId: hex(16), parentSpanId: parent, name: `${method} ${path}`, kind: "server", service, startMs: t, durationMs: 180, status: "unset", statusMessage: null, attributes: [["http.request.method", method], ["url.path", path], ["http.response.status_code", method === "POST" ? "202" : "200"]], links: [] };
+  const list = [root];
+  (downstream[service] ?? []).forEach((next, i) => {
+    const call: MockSpan = { ...root, spanId: hex(16), parentSpanId: root.spanId, name: `GET ${next}`, kind: "client", startMs: t + 20 + i * 70, durationMs: 60, attributes: [["http.request.method", "GET"], ["server.address", "127.0.0.1"]] };
+    list.push(call, { ...call, spanId: hex(16), parentSpanId: call.spanId, kind: "server", service: next, startMs: call.startMs + 4, durationMs: 50, attributes: [["http.route", "/internal"]] });
+  });
+  spans.set(traceId, [...(spans.get(traceId) ?? []), ...list]);
+}
+
+/**
+ * Answers like a running dev server: logs the request (with the X-Request-ID it
+ * received) and "forwards" it downstream so the trace has hops. Refuses when stopped.
+ */
 async function fakeHttp(req: { method: string; url: string; headers: [string, string][]; body: { kind: string; value?: string } }) {
   const u = new URL(req.url);
   const port = Number(u.port || 80);
@@ -170,6 +186,8 @@ async function fakeHttp(req: { method: string; url: string; headers: [string, st
   const idOf = (n: string) => [...live.keys()].find((id) => id.endsWith(`/${n}`));
   if (!name || !idOf(name)) throw `Couldn't connect to ${u.hostname}:${port}. Is the service running?`;
   const rid = req.headers.find(([k]) => k.toLowerCase() === "x-request-id")?.[1] ?? "-";
+  const tp = req.headers.find(([k]) => k.toLowerCase() === "traceparent")?.[1]?.split("-");
+  if (tp) recordSpans(tp[1], tp[2], name, req.method, u.pathname);
   const jobId = u.pathname.split("/").pop()?.match(/^[0-9a-f]{6}$/) ? u.pathname.split("/").pop()! : "8f2c1e";
   log(idOf(name)!, `${req.method} ${u.pathname} req=${rid}`);
   await new Promise((r) => setTimeout(r, 60));
@@ -263,6 +281,10 @@ export function installMockBackend() {
         case "step_cancel":
           subs.delete(a.id);
           return true;
+        case "otel_status":
+          return { port: 4318, fallback: false, error: null, spans: [...spans.values()].flat().length };
+        case "otel_spans":
+          return a.traceIds.flatMap((id: string) => spans.get(id) ?? []);
         case "http_drop_jar":
           return null;
         case "auxin_list_dir":

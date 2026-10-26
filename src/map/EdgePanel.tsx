@@ -12,6 +12,7 @@ export const SOURCE_SHORT: Record<SourceKind, string> = {
   code: "code",
   traffic: "seen",
   connection: "conn",
+  otel: "otel",
   manual: "manual",
 };
 
@@ -23,6 +24,7 @@ export const SOURCE_LABEL: Record<SourceKind, string> = {
   code: "Source code",
   traffic: "Seen in a trace",
   connection: "Seen as an open connection",
+  otel: "Seen in OpenTelemetry spans",
   manual: "Added or kept by you",
 };
 

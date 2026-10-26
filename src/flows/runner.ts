@@ -3,12 +3,14 @@
  * from earlier responses, polling, checks, extraction, trace headers, the trace
  * itself, run history, and the connection sampler during runs.
  */
-import { api, type HttpResponse, type QueueMessage } from "../lib/api";
+import { api, type HttpResponse, type QueueMessage, type Span } from "../lib/api";
 import { getLogs } from "../state/logs";
 import { selectServices, toast, useStore } from "../state/store";
 import { mask, prepareQueue, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, runQueueStep, validateFlow, type Issue, type QueueStepResult } from "./engine";
 import type { CheckResult } from "./eval";
+import { serviceKey } from "../map/model";
 import { recordObserved } from "../map/store";
+import { spanHops, spanLinks } from "./spans";
 import { allSteps, DEFAULT_NETWORK, parseFlow, serializeFlow, slugify, type FlowDoc, type FlowStep, type KV } from "./model";
 import { activeEnvName, rk, serviceIdFor, servicePorts, useFlows, varSources, write } from "./store";
 import { computeTrace, correlationValues, isCorrelationValue, type TraceResult, type TraceService } from "./trace";
@@ -44,6 +46,8 @@ export interface StepOutcome {
   /** Queue steps: the message received, or where a message was published. */
   message?: QueueMessage;
   published?: QueueStepResult["published"];
+  /** OpenTelemetry spans of this step's trace and the traces linked to it. */
+  spans?: Span[];
   /** Consume: messages that didn't match, and messages from other runs left out. */
   seen?: number;
   skipped?: number;
@@ -195,6 +199,7 @@ async function executeQueue(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Pro
   // Error text can echo a broker URL (and any secret resolved into it).
   if (o.error) o.error = mask(o.error, prep.usedSecrets, src);
   setOutcome(key, o);
+  if (o.published) scheduleSpans(doc, step, o);
   return o;
 }
 
@@ -270,8 +275,55 @@ function scheduleTrace(doc: FlowDoc, step: FlowStep, o: StepOutcome, requestBody
         (v) => !secretValues.some((sv) => sv && (v.includes(sv) || sv.includes(v))),
       ),
     });
-    patchOutcome(rk(doc.path, step.id), o.reqId, { tracing: false, trace });
+    // Spans, when the services send them, replace the log hops with measured ones.
+    const spans = await fetchSpans(o);
+    const hops = spans.length ? spanHops(spans, (name) => flowServiceNamed(doc, name)) : [];
+    patchOutcome(rk(doc.path, step.id), o.reqId, { tracing: false, trace: hops.length ? { ...trace, hops, source: "otel" } : trace, ...(spans.length ? { spans } : {}) });
     observe(doc, trace.traffic, "traffic", (from, to) => `Request ${o.requestId} was logged by ${from}, then by ${to}`);
+    observeSpans(spans, o.requestId);
+  })();
+  pendingTraces.set(o.reqId, p);
+  void p.finally(() => pendingTraces.delete(o.reqId));
+}
+
+/** Spans for a step's trace (and traces linked to it), if the receiver is running and services sent any. */
+async function fetchSpans(o: StepOutcome): Promise<Span[]> {
+  if (!o.traceId || !useStore.getState().otel?.port) return [];
+  return api.otelSpans([o.traceId]).catch(() => []);
+}
+
+/** The flow service a span's `service.name` belongs to: Auxin starts services with their name as the service name. */
+function flowServiceNamed(doc: FlowDoc, name: string): { id: string; alias: string } | undefined {
+  const svc = selectServices(useStore.getState()).find((x) => x.name.toLowerCase() === name.toLowerCase());
+  if (!svc) return undefined;
+  const fs = doc.services.find((f) => serviceIdFor(f.ref) === svc.id);
+  return { id: svc.id, alias: fs?.alias ?? svc.name };
+}
+
+/** Links between services the spans prove go to the project map, by service folder. */
+function observeSpans(spans: Span[], requestId?: string) {
+  const root = get().root;
+  if (!spans.length || !root) return;
+  const services = selectServices(useStore.getState());
+  const key = (name: string) => {
+    const svc = services.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    return svc ? serviceKey(svc, root) : undefined;
+  };
+  recordObserved(
+    spanLinks(spans).flatMap(([a, b]) => (key(a) && key(b) ? [{ from: key(a)!, to: key(b)!, source: "otel" as const, detail: `${a} called ${b} in the spans of ${requestId ?? "a request"}` }] : [])),
+  );
+}
+
+/** A publish step's trace: only spans, since there's no response or entry port to match logs with. */
+function scheduleSpans(doc: FlowDoc, step: FlowStep, o: StepOutcome) {
+  if (!o.traceId) return;
+  const p = (async () => {
+    await sleep(doc.graceMs);
+    const spans = await fetchSpans(o);
+    if (!spans.length) return;
+    const hops = spanHops(spans, (name) => flowServiceNamed(doc, name));
+    patchOutcome(rk(doc.path, step.id), o.reqId, { spans, trace: { lines: [], nearby: [], hops, matchedBy: [], unavailable: [], traffic: [], source: "otel" } });
+    observeSpans(spans, o.requestId);
   })();
   pendingTraces.set(o.reqId, p);
   void p.finally(() => pendingTraces.delete(o.reqId));

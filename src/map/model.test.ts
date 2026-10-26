@@ -4,7 +4,7 @@ import { addNode, edgeKey, emptyTopology, keepEdge, mergeTopology, parseTopology
 
 const ROOT = "/w";
 const svc = (name: string, framework: string | null = null): Service =>
-  ({ id: `${ROOT}/${name}`, index: 0, name, path: `${ROOT}/${name}`, kind: "node", framework, command: "", detectedCommand: null, suggestions: [], savedCommands: [], cwd: "", env: [], venv: null, useVenv: false, color: 0, portHint: null, manual: false }) as Service;
+  ({ id: `${ROOT}/${name}`, index: 0, name, path: `${ROOT}/${name}`, kind: "node", framework, command: "", detectedCommand: null, suggestions: [], savedCommands: [], cwd: "", env: [], venv: null, useVenv: false, color: 0, portHint: null, manual: false, otel: false, sendTraces: false }) as Service;
 const ev = (source: "compose" | "env", confidence: "declared" | "inferred") => [{ source, confidence, detail: `${source} file` }];
 const discovery: Discovery = {
   nodes: [{ key: "postgres", kind: "database", label: "postgres", tech: "postgres", endpoint: "localhost:5432", evidence: ev("compose", "declared") }],

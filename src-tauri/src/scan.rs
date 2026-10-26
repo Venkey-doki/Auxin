@@ -28,6 +28,8 @@ pub struct DetectedService {
     /// Absolute path of a virtualenv found inside the service folder.
     pub venv: Option<String>,
     pub port_hint: Option<u16>,
+    /// Already depends on an OpenTelemetry SDK, so it can export spans to Auxin unchanged.
+    pub otel: bool,
 }
 
 const SKIP_DIRS: &[&str] = &[
@@ -148,6 +150,26 @@ fn detect(dir: &Path) -> Option<DetectedService> {
         default_command,
         venv: venv.map(|v| v.to_string_lossy().into_owned()),
         port_hint: port_from_env_file(dir).or(python_port),
+        otel: uses_otel(dir),
+    })
+}
+
+/// Looks for an OpenTelemetry dependency in the folder's own manifests (not subfolders).
+fn uses_otel(dir: &Path) -> bool {
+    let node = read(&dir.join("package.json")).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()).is_some_and(|pkg| {
+        ["dependencies", "devDependencies"].iter().filter_map(|k| pkg.get(k)?.as_object()).any(|d| d.keys().any(|n| n.starts_with("@opentelemetry/")))
+    });
+    node || fs::read_dir(dir).into_iter().flatten().flatten().any(|e| {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let needle = match name.as_str() {
+            "pyproject.toml" | "Pipfile" | "setup.py" => "opentelemetry",
+            n if n.starts_with("requirements") && n.ends_with(".txt") => "opentelemetry",
+            "go.mod" => "go.opentelemetry.io",
+            "pom.xml" | "build.gradle" | "build.gradle.kts" => "io.opentelemetry",
+            n if n.ends_with(".csproj") => "opentelemetry",
+            _ => return false,
+        };
+        read(&e.path()).is_some_and(|t| t.to_lowercase().contains(needle))
     })
 }
 
@@ -361,5 +383,31 @@ mod tests {
         for s in scan(Path::new(&root)) {
             println!("{:<55} {:<8} {:<10} {:?} venv={:?}", s.name, s.kind, s.framework.unwrap_or_default(), s.default_command, s.venv.map(|v| file_name(Path::new(&v))));
         }
+    }
+
+    #[test]
+    fn detects_opentelemetry() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = [
+            ("web/package.json", r#"{"scripts":{"dev":"node ."},"dependencies":{"@opentelemetry/sdk-node":"^0.57.0"}}"#),
+            ("plain/package.json", r#"{"scripts":{"dev":"node ."},"dependencies":{"express":"^4"},"description":"no @opentelemetry/ here"}"#),
+            ("api/requirements-dev.txt", "OpenTelemetry-Distro==0.48b0\n"),
+            ("api/main.py", "print(1)\n"),
+            ("pay/go.mod", "module pay\nrequire go.opentelemetry.io/otel v1.32.0\n"),
+            ("billing/pom.xml", "<artifactId>opentelemetry-api</artifactId><groupId>io.opentelemetry</groupId>"),
+            ("orders/Orders.csproj", "<PackageReference Include=\"OpenTelemetry.Extensions.Hosting\" />"),
+            ("orders/Procfile", "web: dotnet run\n"),
+            // Only the service's top level counts.
+            ("nested/go.mod", "module nested\n"),
+            ("nested/tools/go.mod", "require go.opentelemetry.io/otel v1.32.0\n"),
+        ];
+        for (path, text) in files {
+            let p = dir.path().join(path);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, text).unwrap();
+        }
+        let otel: Vec<(String, bool)> = scan(dir.path()).into_iter().map(|s| (s.name, s.otel)).collect();
+        let expect = [("api", true), ("billing", true), ("nested", false), ("orders", true), ("pay", true), ("plain", false), ("web", true)];
+        assert_eq!(otel, expect.map(|(n, o)| (n.to_string(), o)));
     }
 }

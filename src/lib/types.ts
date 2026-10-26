@@ -17,6 +17,8 @@ export interface DetectedService {
   defaultCommand: string | null;
   venv: string | null;
   portHint: number | null;
+  /** Its dependencies include an OpenTelemetry SDK. */
+  otel?: boolean;
 }
 
 /** User edits layered over detection; keyed by service id (its path). */
@@ -31,6 +33,8 @@ export interface ServiceOverride {
   color?: number;
   /** Port the service last announced in its logs; used while it's stopped. */
   lastPort?: number;
+  /** Send its OpenTelemetry traces to Auxin (defaults to on when it uses an SDK). */
+  otel?: boolean;
 }
 
 export interface ManualService {
@@ -99,6 +103,10 @@ export interface Service {
   color: number;
   portHint: number | null;
   manual: boolean;
+  /** Uses an OpenTelemetry SDK (detected). */
+  otel: boolean;
+  /** Started with its trace exporter pointed at Auxin. */
+  sendTraces: boolean;
 }
 
 export interface Runtime {

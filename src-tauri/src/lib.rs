@@ -2,6 +2,7 @@ mod conns;
 mod deps;
 mod http;
 mod netpolicy;
+mod otel;
 mod process;
 mod queue;
 mod scan;
@@ -118,6 +119,17 @@ fn running_services(manager: State<'_, Arc<Manager>>) -> Vec<(String, u32)> {
 }
 
 #[tauri::command]
+fn otel_status(otel: State<'_, Arc<otel::OtelState>>) -> otel::Status {
+    otel.status()
+}
+
+/// Spans of these traces plus the traces linked to or from them.
+#[tauri::command]
+fn otel_spans(otel: State<'_, Arc<otel::OtelState>>, trace_ids: Vec<String>) -> Vec<otel::Span> {
+    otel.spans_for(&trace_ids)
+}
+
+#[tauri::command]
 fn check_port(port: u16) -> bool {
     ["127.0.0.1", "::1"].iter().any(|host| {
         let addr: SocketAddr = format!("{}:{port}", if host.contains(':') { format!("[{host}]") } else { host.to_string() })
@@ -175,6 +187,9 @@ pub fn run() {
             app.manage(Arc::new(http::HttpState::default()));
             app.manage(Arc::new(queue::QueueState::default()));
             app.manage(workspace_files::FileWatch::default());
+            let traces = Arc::new(otel::OtelState::default());
+            app.manage(traces.clone());
+            tauri::async_runtime::spawn(otel::run(traces));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -199,7 +214,9 @@ pub fn run() {
             auxin_list_dir,
             auxin_read,
             discover_topology,
-            sample_connections
+            sample_connections,
+            otel_status,
+            otel_spans
         ])
         .build(tauri::generate_context!())
         .expect("error while building Auxin");
