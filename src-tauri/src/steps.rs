@@ -4,8 +4,64 @@
 use crate::http::{HttpRequest, HttpResponse, HttpState};
 use crate::queue::{ConsumeRequest, ConsumeResult, PublishRequest, PublishResult, QueueState};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
+
+/// Steps in flight by id, for every kind, so Stop can abort any of them.
+pub(crate) static INFLIGHT: LazyLock<Inflight> = LazyLock::new(Inflight::default);
+
+/// Ids stopped before their step reached the backend; old ones are forgotten.
+const STOPPED_EARLY_CAP: usize = 64;
+
+#[derive(Default)]
+pub(crate) struct Inflight(Mutex<Tasks>);
+
+#[derive(Default)]
+struct Tasks {
+    running: HashMap<String, tauri::async_runtime::JoinHandle<()>>,
+    stopped_early: VecDeque<String>,
+}
+
+impl Inflight {
+    /// Runs `f` so `cancel(id)` can abort it mid-flight. If Stop came first, it doesn't run at all.
+    pub async fn run<T: Send + 'static>(&self, id: &str, f: impl Future<Output = Result<T, String>> + Send + 'static) -> Result<T, String> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        {
+            let mut t = self.0.lock().unwrap();
+            if let Some(i) = t.stopped_early.iter().position(|x| x == id) {
+                t.stopped_early.remove(i);
+                return Err("Cancelled".into());
+            }
+            let handle = tauri::async_runtime::spawn(async move {
+                let _ = tx.send(f.await);
+            });
+            t.running.insert(id.to_string(), handle);
+        }
+        let out = rx.await.unwrap_or_else(|_| Err("Cancelled".into()));
+        self.0.lock().unwrap().running.remove(id);
+        out
+    }
+
+    /// Aborts the step running with this id. With `early`, an id that isn't running
+    /// yet is remembered, so its step is stopped when it arrives (Stop pressed just
+    /// as a request was being handed to the backend).
+    pub fn cancel(&self, id: &str, early: bool) -> bool {
+        let mut t = self.0.lock().unwrap();
+        if let Some(h) = t.running.remove(id) {
+            h.abort();
+            return true;
+        }
+        if early {
+            if t.stopped_early.len() >= STOPPED_EARLY_CAP {
+                t.stopped_early.pop_front();
+            }
+            t.stopped_early.push_back(id.to_string());
+        }
+        false
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
@@ -38,6 +94,37 @@ pub async fn exec(http: Arc<HttpState>, queue: Arc<QueueState>, req: StepRequest
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn stop_before_the_step_arrives_still_stops_it() {
+        let inflight = Inflight::default();
+        assert!(!inflight.cancel("early", true));
+        let ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let r = ran.clone();
+        let out = tauri::async_runtime::block_on(inflight.run("early", async move {
+            r.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }));
+        assert_eq!(out, Err("Cancelled".into()));
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+        // Only once: the same id can run afterwards.
+        assert_eq!(tauri::async_runtime::block_on(inflight.run("early", async { Ok(1) })), Ok(1));
+        // A plain cancel of an unknown id leaves nothing behind.
+        assert!(!inflight.cancel("other", false));
+        assert_eq!(tauri::async_runtime::block_on(inflight.run("other", async { Ok(2) })), Ok(2));
+        // Running steps are aborted.
+        let stopper = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(100));
+            INFLIGHT.cancel("slow", true)
+        });
+        let out = tauri::async_runtime::block_on(INFLIGHT.run("slow", async {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            Ok(())
+        }));
+        assert!(stopper.join().unwrap());
+        assert_eq!(out, Err("Cancelled".into()));
+    }
 
     #[test]
     fn requests_are_tagged_by_kind() {

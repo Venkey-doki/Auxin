@@ -78,7 +78,6 @@ pub struct HttpResponse {
 #[derive(Default)]
 pub struct HttpState {
     jars: Mutex<HashMap<String, Arc<Jar>>>,
-    inflight: Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl HttpState {
@@ -90,28 +89,11 @@ impl HttpState {
         self.jars.lock().unwrap().remove(id);
     }
 
-    /// Runs `send` so `cancel(id)` can abort it mid-flight.
+    /// Sends so Stop (`steps::INFLIGHT.cancel`) can abort it mid-flight.
     pub async fn send(self: Arc<Self>, req: HttpRequest, temp_dir: PathBuf) -> Result<HttpResponse, String> {
         let id = req.id.clone();
-        let (tx, rx) = tokio::sync::oneshot::channel();
         let me = self.clone();
-        let handle = tauri::async_runtime::spawn(async move {
-            let _ = tx.send(execute(&me, req, temp_dir).await);
-        });
-        self.inflight.lock().unwrap().insert(id.clone(), handle);
-        let out = rx.await.unwrap_or_else(|_| Err("Cancelled".into()));
-        self.inflight.lock().unwrap().remove(&id);
-        out
-    }
-
-    pub fn cancel(&self, id: &str) -> bool {
-        match self.inflight.lock().unwrap().remove(id) {
-            Some(h) => {
-                h.abort();
-                true
-            }
-            None => false,
-        }
+        crate::steps::INFLIGHT.run(&id, async move { execute(&me, req, temp_dir).await }).await
     }
 }
 
@@ -372,12 +354,11 @@ mod tests {
     fn cancel_aborts_inflight_request() {
         let (url, _server) = serve_once("HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n", 1500);
         let state = Arc::new(HttpState::default());
-        let s2 = state.clone();
         let mut r = req(url, "GET", HttpBody::None);
         r.id = "cancel-me".into();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(200));
-            assert!(s2.cancel("cancel-me"));
+            assert!(crate::steps::INFLIGHT.cancel("cancel-me", false));
         });
         let started = Instant::now();
         let err = rt().block_on(state.send(r, std::env::temp_dir())).unwrap_err();

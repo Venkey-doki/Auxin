@@ -79,13 +79,15 @@ export function prepareRequest(step: FlowStep, src: VarSources, injectHeaders: b
   return { method: step.method, url: url.text, headers: finalHeaders, body, bodyText, missing: [...missing], usedSecrets: [...usedSecrets], requestId: ids?.requestId, traceId: ids?.traceId };
 }
 
-/** Replaces the values of the secrets a request used. */
+/**
+ * Replaces the values of the secrets a request used, and of token-like values
+ * extracted earlier (`accessToken`, `sessionId`…), also in their URL-encoded form.
+ */
 export function mask(text: string, used: Iterable<string>, src: VarSources): string {
+  const values = [...used].map((name) => src.secrets[name]);
+  for (const [k, v] of Object.entries(src.extra ?? {})) if (SENSITIVE_KEY.test(k) && v.length >= 4) values.push(v);
   let out = text;
-  for (const name of used) {
-    const v = src.secrets[name];
-    if (v) out = out.split(v).join("••••••");
-  }
+  for (const v of values) if (v) for (const form of new Set([v, encodeURIComponent(v)])) out = out.split(form).join(HIDDEN);
   return out;
 }
 
@@ -493,6 +495,10 @@ export function validateFlow(items: FlowItem[], ctx: ValidateContext): Issue[] {
     if (s.queue) queueIssues(s, num(s.id), ctx).forEach((i) => issues.push(i));
     else if (!s.url.trim()) issues.push({ id: s.id, level: "error", message: `Request ${num(s.id)} has no URL.` });
     const missing = s.queue ? prepareQueue(s, ctx.src, ctx.brokers ?? {}, false).missing : prepareRequest(s, ctx.src, false).missing;
+    // A run opens its listens when it starts; one that needs an extracted value can only open when it's reached.
+    const late = s.type === "queue.consume" ? missing.filter((m) => known.has(m) || maybe.has(m)) : [];
+    if (late.length)
+      issues.push({ id: s.id, level: "warning", message: `Step ${num(s.id)} uses ${late.map((m) => `{{${m}}}`).join(", ")} from an earlier step, so it starts listening only when it's reached and can miss a message sent before that.` });
     for (const m of missing) {
       if (known.has(m)) continue;
       if (maybe.has(m)) {

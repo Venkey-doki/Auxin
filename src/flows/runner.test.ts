@@ -34,7 +34,7 @@ import { appendLogs } from "../state/logs";
 import { useStore } from "../state/store";
 import { blankBlock, blankQueueStep, blankStep, isStep, newFlow, parseEnv, serializeFlow, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
 import { cancelRun, cancelStep, replayRun, runFlow, sendStep } from "./runner";
-import { activeEnvName, rk, saveEnv, saveEnvIn, sliceOf, syncWorkspace, updateFlow, useFlows } from "./store";
+import { activeEnvName, createFlow, rk, saveEnv, saveEnvIn, sliceOf, syncWorkspace, updateFlow, useFlows } from "./store";
 
 const ROOT = "/w";
 const res = (status: number, body: unknown, extra: Partial<HttpResponse> = {}): HttpResponse => {
@@ -222,6 +222,20 @@ describe("review regressions", () => {
     expect(JSON.stringify(rec)).not.toContain("tok_live");
   });
 
+  it("history keeps the body as sent, and hides tokens extracted into later URLs", async () => {
+    http.handler = async (r) => (r.url.endsWith("/login") ? res(200, { accessToken: "tok_live_ABCDEF123456" }) : res(200, {}));
+    const doc = setup([
+      step({ id: "a", url: "{{gw}}/login", method: "POST", body: { kind: "json", text: '{"region": "{{region}}", "key": "{{token}}"}', form: [], file: "" }, extract: [{ key: "accessToken", value: "body.accessToken" }] }),
+      step({ id: "b", url: "{{gw}}/me?access_token={{accessToken}}" }),
+    ]);
+    await runFlow(doc.path);
+    expect(http.sent[1].url).toContain("tok_live_ABCDEF123456");
+    expect(out("b").url).toBe("http://localhost:4000/me?access_token=••••••");
+    const rec = JSON.parse(http.writes.find(([p]) => p.startsWith("runs/"))![1]);
+    expect(rec.steps[0].request.body).toBe('{"region": "EU", "key": "••••••"}');
+    expect(JSON.stringify(rec)).not.toContain("tok_live");
+  });
+
   it("refuses single sends during a run, and Cancel during a run stops the run without poisoning later sends", async () => {
     let n = 0;
     http.handler = async () => {
@@ -360,6 +374,25 @@ describe("control flow, history and replay", () => {
     await replayRun(doc.path, rec);
     expect(http.sent.map((r) => r.url)).toEqual(["http://localhost:4000/original"]);
     expect(record().replayOf).toBe(rec.runId);
+  });
+
+  it("records the requests as this run sent them, so a replay sends the same", async () => {
+    let edited = false;
+    http.handler = async (r) => {
+      if (!edited && r.url.endsWith("/a")) {
+        edited = true;
+        updateFlow("flows/e2e.flow.json", (f) => ({ ...f, steps: [f.steps[0], step({ id: "b", url: "{{gw}}/b-edited" })] }));
+      }
+      return res(200, {});
+    };
+    const doc = setup([step({ id: "a", url: "{{gw}}/a" }), step({ id: "b", url: "{{gw}}/b" })]);
+    await runFlow(doc.path);
+    expect(http.sent.map((r) => r.url)).toEqual(["http://localhost:4000/a", "http://localhost:4000/b-edited"]);
+    const rec = record();
+    expect(rec.snapshot.steps[1].http.url).toBe("{{gw}}/b-edited");
+    http.sent = [];
+    await replayRun(doc.path, rec);
+    expect(http.sent.map((r) => r.url)).toEqual(["http://localhost:4000/a", "http://localhost:4000/b-edited"]);
   });
 
   it("Stop cancels every request a parallel block has in flight", async () => {
@@ -570,5 +603,22 @@ describe("map discovery across a workspace switch", () => {
     await sleep(0);
     expect(useMap.getState()).toMatchObject({ discovery: { nodes: [], edges: [] }, discovering: false });
     vi.mocked(api.discoverTopology).mockImplementation(async () => ({ nodes: [], edges: [] }) as never);
+  });
+});
+
+describe("environment files that can't be read", () => {
+  it("are never written over, by a new flow or by a save", async () => {
+    setup([]);
+    http.disk = [
+      ["env/local.json", "<<<<<<< HEAD\n{}"],
+      ["env/local.secret.json", JSON.stringify({ secrets: { token: "keep-me" } })],
+    ];
+    await syncWorkspace(null);
+    await syncWorkspace(ROOT);
+    expect(useFlows.getState().broken["env/local.json"]).toBeTruthy();
+    http.writes = [];
+    await createFlow("Fresh");
+    await saveEnv(parseEnv("local"));
+    expect(http.writes.map(([p]) => p)).toEqual(["flows/fresh.flow.json"]);
   });
 });

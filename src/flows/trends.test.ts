@@ -50,6 +50,12 @@ describe("trends", () => {
     expect(q).toMatchObject({ runs: 2, failures: 0, p50: 12 });
   });
 
+  it("a stopped run leaves a gap in the whole-run trend", () => {
+    const [whole] = flowTrends([rec(2, [], "cancelled"), rec(1, [])]);
+    expect(whole).toMatchObject({ runs: 1, p50: 1000 });
+    expect(whole.points.map((p) => p.ms)).toEqual([1000, undefined]);
+  });
+
   it("no runs, no trends", () => {
     expect(flowTrends([])).toEqual([]);
   });

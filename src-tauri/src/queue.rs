@@ -228,20 +228,12 @@ struct Sub {
 #[derive(Default)]
 pub struct QueueState {
     subs: Mutex<HashMap<String, Sub>>,
-    inflight: Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl QueueState {
     /// Runs `f` so `cancel(id)` can abort it mid-flight (as `HttpState::send`).
     async fn tracked<T: Send + 'static>(&self, id: &str, f: impl Future<Output = Result<T, String>> + Send + 'static) -> Result<T, String> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        let handle = tauri::async_runtime::spawn(async move {
-            let _ = tx.send(f.await);
-        });
-        self.inflight.lock().unwrap().insert(id.to_string(), handle);
-        let out = rx.await.unwrap_or_else(|_| Err("Cancelled".into()));
-        self.inflight.lock().unwrap().remove(id);
-        out
+        crate::steps::INFLIGHT.run(id, f).await
     }
 
     pub async fn publish(self: Arc<Self>, req: PublishRequest) -> Result<PublishResult, String> {
@@ -298,14 +290,17 @@ impl QueueState {
         })
     }
 
-    /// Aborts an in-flight publish or wait and closes the subscription with this id.
+    /// Aborts an in-flight publish or wait and closes the subscription with this id
+    /// (as `step_cancel` does, without remembering ids that aren't running yet).
+    #[cfg(test)]
     pub fn cancel(&self, id: &str) -> bool {
-        let task = self.inflight.lock().unwrap().remove(id);
-        if let Some(t) = &task {
-            t.abort();
-        }
-        let sub = self.subs.lock().unwrap().remove(id);
-        task.is_some() || sub.is_some()
+        let task = crate::steps::INFLIGHT.cancel(id, false);
+        self.close(id) || task
+    }
+
+    /// Closes the subscription with this id, if there is one.
+    pub fn close(&self, id: &str) -> bool {
+        self.subs.lock().unwrap().remove(id).is_some()
     }
 }
 

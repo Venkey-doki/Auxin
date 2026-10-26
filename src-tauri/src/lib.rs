@@ -25,8 +25,10 @@ async fn step_exec(app: AppHandle, state: State<'_, Arc<http::HttpState>>, queue
 
 /// Cancels an in-flight step of any kind by its id, and closes a queue subscription with it.
 #[tauri::command]
-fn step_cancel(state: State<'_, Arc<http::HttpState>>, queue: State<'_, Arc<queue::QueueState>>, id: String) -> bool {
-    state.cancel(&id) | queue.cancel(&id)
+fn step_cancel(queue: State<'_, Arc<queue::QueueState>>, id: String) -> bool {
+    // An id with nothing running and no subscription is a step still on its way: stop it when it arrives.
+    let closed = queue.close(&id);
+    steps::INFLIGHT.cancel(&id, !closed) || closed
 }
 
 #[tauri::command]

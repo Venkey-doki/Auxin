@@ -22,7 +22,7 @@ If `topology.json` can't be read (often a git merge conflict), the Map screen sa
 - **Config files** in each service (`config/`, `*.config.*`, `settings.py`, `appsettings.json`, …).
 - **Source code** only after you turn on *Code scan* on the Map screen. That choice is saved in this machine's Auxin settings for the workspace, never in the project, so a teammate's checkout doesn't read code without their consent.
 
-Passwords never reach the map: URL credentials become `••••`, and values of keys like `PASSWORD`, `SECRET`, `TOKEN`, `API_KEY` become `••••••`, before evidence leaves the backend.
+Passwords never reach the map: URL credentials become `••••`, and values of keys like `PASSWORD`, `SECRET`, `TOKEN`, `API_KEY` and `Authorization` become `••••••`, before evidence leaves the backend. An unquoted value is hidden to the end of the line (`Authorization: Bearer …`, `PASSWORD=two words`), stopping earlier only at the next `key=` or a separator such as `,`, `;` or `&`.
 
 ## How links are drawn
 

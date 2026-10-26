@@ -89,7 +89,7 @@ const SCHEMES: &[(&str, &str, &str, Option<u16>)] = &[
 ];
 const KAFKA: (&str, &str, &str, Option<u16>) = ("kafka", "queue", "kafka", Some(9092));
 
-const SECRET_WORDS: &[&str] = &["PASSWORD", "PASSWD", "SECRET", "TOKEN", "API_KEY", "APIKEY", "PRIVATE_KEY", "CREDENTIAL"];
+const SECRET_WORDS: &[&str] = &["PASSWORD", "PASSWD", "SECRET", "TOKEN", "API_KEY", "APIKEY", "PRIVATE_KEY", "CREDENTIAL", "AUTHORIZATION"];
 pub(crate) const MASK: &str = "••••••";
 
 pub fn discover(root: &Path, services: &[ServiceRef], code_scan: bool) -> Discovery {
@@ -601,7 +601,7 @@ fn mask_secret_values(s: &str) -> String {
         }
         let (from, to) = match b.get(j) {
             Some(&q @ (b'"' | b'\'')) => (j + 1, s[j + 1..].find(q as char).map_or(b.len(), |e| j + 1 + e)),
-            _ => (j, s[j..].find(|c: char| c.is_whitespace() || matches!(c, ',' | '}' | ']' | '&' | ';' | '"' | '\'')).map_or(b.len(), |e| j + e)),
+            _ => (j, unquoted_end(s, j)),
         };
         if to > from {
             out.push_str(&s[copied..from]);
@@ -612,6 +612,25 @@ fn mask_secret_values(s: &str) -> String {
     }
     out.push_str(&s[copied..]);
     out
+}
+
+/// Where an unquoted value starting at `from` ends: at the end of the line or a
+/// delimiter, or before a space that starts the next `key=` (so `Bearer abc` and
+/// `two words` are masked whole, but `PASSWORD=x url=…` keeps `url=…`).
+fn unquoted_end(s: &str, from: usize) -> usize {
+    let line = s[from..].find(['\n', '\r', ',', '}', ']', '&', ';', '"', '\'']).map_or(s.len(), |e| from + e);
+    let mut end = from;
+    for word in s[from..line].split_inclusive(char::is_whitespace) {
+        let w = word.trim();
+        let k = w.find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))).unwrap_or(w.len());
+        // `key=…`, or `key:` on its own (`user:pass` and `https://…` are part of the value).
+        let next_key = end > from && k > 0 && (w[k..].starts_with('=') || w[k..] == *":");
+        if next_key {
+            break;
+        }
+        end += word.len();
+    }
+    from + s[from..end].trim_end().len()
 }
 
 #[cfg(test)]
@@ -705,6 +724,10 @@ mod tests {
         assert_eq!(redact("x=https://h/cb?client_secret=abc&y=1"), "x=https://h/cb?client_secret=••••••&y=1");
         assert_eq!(redact("mongodb+srv://u:p@a@c.example.net,d:1/x"), "mongodb+srv://••••@c.example.net,d:1/x");
         assert_eq!(redact("private-key: k"), "private-key: ••••••");
+        assert_eq!(redact("Authorization: Bearer eyJabc.def"), "Authorization: ••••••");
+        assert_eq!(redact("DB_PASSWORD=two words\nNEXT=1"), "DB_PASSWORD=••••••\nNEXT=1");
+        assert_eq!(redact("TOKEN=abc  "), "TOKEN=••••••  ");
+        assert_eq!(redact("Authorization: Basic user:pass"), "Authorization: ••••••");
         // Untouched: no secret key, no userinfo; idempotent.
         assert_eq!(redact("API_URL=http://localhost:8000"), "API_URL=http://localhost:8000");
         assert_eq!(redact(&redact("PASSWORD=x url=redis://:p@h")), "PASSWORD=•••••• url=redis://••••@h");

@@ -11,7 +11,7 @@ import type { CheckResult } from "./eval";
 import { serviceKey } from "../map/model";
 import { recordObserved } from "../map/store";
 import { spanHops, spanLinks } from "./spans";
-import { allSteps, DEFAULT_NETWORK, parseFlow, serializeFlow, slugify, type FlowDoc, type FlowStep, type KV } from "./model";
+import { allSteps, DEFAULT_NETWORK, mapSteps, parseFlow, serializeFlow, slugify, type FlowDoc, type FlowStep, type KV } from "./model";
 import { activeEnvName, rk, serviceIdFor, servicePorts, sliceOf, updateSlice, useFlows, varSources, writeTo } from "./store";
 import type { VarSources } from "./vars";
 import { computeTrace, correlationValues, isCorrelationValue, type TraceResult, type TraceService } from "./trace";
@@ -27,6 +27,8 @@ export interface StepOutcome {
   method: string;
   url: string;
   headers: [string, string][];
+  /** The request body or message as sent, masked the same way; none for a file body. */
+  body?: string;
   tries?: number;
   /** Attempts under the request's retry rule, and the one about to be sent while waiting. */
   attempts?: number;
@@ -117,6 +119,7 @@ async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<
     method: req.method,
     url: mask(req.url, req.usedSecrets, src),
     headers: req.headers.map(([k, v]): [string, string] => [k, mask(v, req.usedSecrets, src)]),
+    body: req.body.kind === "file" ? undefined : mask(req.bodyText, req.usedSecrets, src),
   };
   const base: StepOutcome = { state: "sending", reqId, sentAt: Date.now(), ...shown, checks: [], extracted: [], requestId: req.requestId, traceId: req.traceId };
 
@@ -181,6 +184,7 @@ async function executeQueue(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Pro
     method: step.type === "queue.publish" ? "PUB" : "SUB",
     url: `${q.broker} · ${where}`,
     headers: prep.headers.map(([k, v]): [string, string] => [k, mask(v, prep.usedSecrets, src)]),
+    body: step.type === "queue.publish" ? mask(prep.body, prep.usedSecrets, src) : undefined,
     checks: [],
     extracted: [],
     requestId: prep.requestId,
@@ -454,11 +458,14 @@ export async function runFlow(path: string, opts: { replay?: RunRecord; env?: st
   // Listen from the start of the run, so a message caused by an earlier step isn't missed.
   const subscriptions = await openSubscriptions(doc, runId, env);
   const runIds: string[] = [];
+  // Each request as it was sent, so the record's snapshot (what Replay runs) matches what this run did.
+  const sentAs = new Map<string, FlowStep>();
   const { outcomes, branches, status } = await runItems<StepOutcome>(doc.steps, {
     run: async (step) => {
       // Edits made while running apply to requests not sent yet (not in a replay).
       const live = sliceOf(root)?.flows[path];
       const latest = (!replay && allSteps(live?.steps ?? []).find((s) => s.id === step.id)) || step;
+      sentAs.set(step.id, latest);
       let mine: string | null = null;
       const runDoc = replay ? doc : (live ?? doc);
       const o = await execute(runDoc, latest, {
@@ -504,7 +511,7 @@ export async function runFlow(path: string, opts: { replay?: RunRecord; env?: st
     const latest = sliceOf(root)?.responses[rk(path, st.id)];
     return o && latest?.reqId === o.reqId ? latest : o;
   });
-  await saveHistory(root, path, doc, runId, env, startedAt, finishedAt, status, final, branches, replay?.runId);
+  await saveHistory(root, path, { ...doc, steps: mapSteps(doc.steps, (s) => sentAs.get(s.id) ?? s) }, runId, env, startedAt, finishedAt, status, final, branches, replay?.runId);
   updateSlice(root, (s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], historySavedAt: Date.now() } } }));
 }
 
@@ -606,7 +613,7 @@ async function saveHistory(root: string, path: string, doc: FlowDoc, runId: stri
     branches,
     steps: allSteps(doc.steps).map((st, i) => {
       const o = outcomes[i];
-      const reqBody = o?.res || o?.published || o?.state === "error" ? redactBody(requestBodyText(st), secrets) : undefined;
+      const reqBody = o?.res || o?.published || o?.state === "error" ? redactBody(o?.body ?? requestBodyText(st), secrets) : undefined;
       const resBody = redactBody(o?.res?.bodyText ?? o?.message?.bodyText, secrets);
       return {
         id: st.id,

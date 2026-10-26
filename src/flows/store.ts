@@ -240,7 +240,8 @@ export async function createFlow(name = "New flow") {
   set((s) => ({ flows: { ...s.flows, [path]: doc } }));
   lastValid.set(path, doc);
   await write(path, serializeFlow(doc).text);
-  if (!Object.keys(get().envs).length) await saveEnv(parseEnv("local"));
+  // A first environment, unless there are environment files that just can't be read right now.
+  if (!Object.keys(get().envs).length && !Object.keys(get().broken).some((p) => p.startsWith("env/"))) await saveEnv(parseEnv("local"));
   navigate({ type: "flow", id: path });
 }
 
@@ -274,6 +275,11 @@ export function setActiveEnv(name: string) {
 }
 
 export async function saveEnv(env: EnvDoc) {
+  // Its files on disk couldn't be read (a merge conflict, say): writing would replace them, secrets included.
+  if (get().broken[`env/${env.name}.json`]) {
+    toast("error", `Environment “${env.name}” can't be saved`, `.auxin/env/${env.name}.json or its secret file can't be read. Fix the file first, so it isn't overwritten.`);
+    return;
+  }
   set((s) => ({ envs: { ...s.envs, [env.name]: env } }));
   const { shared, secret } = serializeEnv(env);
   await write(`env/${env.name}.json`, shared);
@@ -285,7 +291,7 @@ export async function saveEnv(env: EnvDoc) {
 export async function saveEnvIn(root: string, env: EnvDoc) {
   if (get().root === root) return saveEnv(env);
   const p = parked.get(root);
-  if (!p) return;
+  if (!p || p.slice.broken[`env/${env.name}.json`]) return;
   p.slice = { ...p.slice, envs: { ...p.slice.envs, [env.name]: env } };
   const { shared, secret } = serializeEnv(env);
   const files: [string, string][] = [[`env/${env.name}.json`, shared]];

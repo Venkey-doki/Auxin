@@ -54,7 +54,12 @@ export function flowTrends(records: RunRecord[]): Trend[] {
   const whole = summarise({
     id: "",
     name: "Whole run",
-    points: runs.map((r) => ({ runId: r.runId, at: r.startedAt, ms: Math.max(0, Date.parse(r.finishedAt) - Date.parse(r.startedAt)), ran: true, failed: r.status === "failed" })),
+    // A stopped run's time says when you pressed Stop, not how long the flow takes.
+    points: runs.map((r) =>
+      r.status === "cancelled"
+        ? { runId: r.runId, at: r.startedAt, ran: false, failed: false }
+        : { runId: r.runId, at: r.startedAt, ms: Math.max(0, Date.parse(r.finishedAt) - Date.parse(r.startedAt)), ran: true, failed: r.status === "failed" },
+    ),
   });
   const order: { id: string; name: string; method: string }[] = [];
   for (const r of [...records]) for (const s of r.steps) if (!order.some((o) => o.id === s.id)) order.push({ id: s.id, name: s.name, method: s.method });

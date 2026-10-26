@@ -322,4 +322,11 @@ describe("queue steps", () => {
     expect(m(pub)[0]).toContain("no exchange or routing key");
     expect(m({ ...pub, queue: { ...pub.queue!, routingKey: "orders" } })).toEqual([]);
   });
+
+  it("warns that a listen using an extracted value can't start with the run", () => {
+    const ctx: ValidateContext = { src, envName: "local", brokers };
+    const first = step({ id: "a", url: "http://x", extract: [{ key: "tenant", value: "body.tenant" }] });
+    const issues = validateFlow([first, consume({}, { destination: "orders.{{tenant}}" })], ctx);
+    expect(issues.map((i) => [i.level, i.message])).toEqual([["warning", expect.stringContaining("{{tenant}} from an earlier step, so it starts listening only when it's reached")]]);
+  });
 });
