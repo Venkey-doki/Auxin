@@ -1,0 +1,53 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Test and type-check output
+coverage/
+*.tsbuildinfo
+
+# Claude Code: per-machine settings and dev-preview config
+.claude/settings.local.json
+.claude/launch.json
+
+# Impeccable design tool: keep DESIGN.md's sidecar (design.json) and the
+# surface briefs (surfaces/); ignore review screenshots, picker state and scratch inputs
+.impeccable/questions/
+.impeccable/review/
+.impeccable/mocks/
+.impeccable/build/
+.impeccable/live/
+.impeccable/config.local.json
+.impeccable/*-payload.json
+.impeccable/*-brief.md
+.impeccable/brief-body.md
+
+# Auxin's own workspace data, if this repo is opened in Auxin
+.auxin/env/*.secret.json
+.auxin/runs/

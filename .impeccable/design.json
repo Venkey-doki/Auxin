@@ -1,0 +1,666 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-23T07:16:54+00:00",
+  "title": "Design System: Auxin",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Steel Ground",
+        "canonical": "oklch(19.0% 0.005 248)",
+        "tonalRamp": [
+          "#090b0d",
+          "#222426",
+          "#3e4042",
+          "#5b5e60",
+          "#7b7d80",
+          "#9c9fa1",
+          "#c1c4c7",
+          "#eceff2"
+        ]
+      },
+      "rail": {
+        "role": "neutral",
+        "displayName": "Rail Black",
+        "canonical": "oklch(16.7% 0.005 248)",
+        "tonalRamp": [
+          "#090b0d",
+          "#222426",
+          "#3e4042",
+          "#5b5e60",
+          "#7b7e80",
+          "#9c9fa2",
+          "#c1c4c7",
+          "#eceff2"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Steel Surface",
+        "canonical": "oklch(21.6% 0.007 248)",
+        "tonalRamp": [
+          "#090b0e",
+          "#212428",
+          "#3d4044",
+          "#5a5e62",
+          "#7a7e82",
+          "#9b9fa3",
+          "#c0c5c9",
+          "#ebeff3"
+        ]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Raised Steel",
+        "canonical": "oklch(24.5% 0.008 240)",
+        "tonalRamp": [
+          "#080c0e",
+          "#212528",
+          "#3c4044",
+          "#5a5e62",
+          "#797e82",
+          "#9a9fa3",
+          "#c0c5c9",
+          "#eaeff4"
+        ]
+      },
+      "surface-3": {
+        "role": "neutral",
+        "displayName": "Lit Steel",
+        "canonical": "oklch(28.2% 0.010 242)",
+        "tonalRamp": [
+          "#080c0f",
+          "#202529",
+          "#3b4045",
+          "#595e63",
+          "#787e83",
+          "#999fa4",
+          "#bfc5ca",
+          "#e9eff5"
+        ]
+      },
+      "pop": {
+        "role": "neutral",
+        "displayName": "Popover Steel",
+        "canonical": "oklch(23.3% 0.007 248)",
+        "tonalRamp": [
+          "#090b0e",
+          "#212427",
+          "#3d4043",
+          "#5a5e62",
+          "#7a7e81",
+          "#9b9fa3",
+          "#c0c5c9",
+          "#ebeff3"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "oklch(27.4% 0.009 248)",
+        "tonalRamp": [
+          "#080c0f",
+          "#212428",
+          "#3c4045",
+          "#5a5e63",
+          "#797e83",
+          "#9a9fa4",
+          "#bfc5ca",
+          "#eaeff5"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Strong Hairline",
+        "canonical": "oklch(33.4% 0.011 248)",
+        "tonalRamp": [
+          "#080c10",
+          "#202529",
+          "#3b4045",
+          "#595e64",
+          "#787e84",
+          "#999fa5",
+          "#bfc5cb",
+          "#e9eff6"
+        ]
+      },
+      "rail-bar": {
+        "role": "neutral",
+        "displayName": "Rail Bar",
+        "canonical": "oklch(36.5% 0.011 248)",
+        "tonalRamp": [
+          "#080c10",
+          "#202529",
+          "#3b4045",
+          "#595e64",
+          "#787e84",
+          "#999fa5",
+          "#bfc5cb",
+          "#e9eff6"
+        ]
+      },
+      "fg": {
+        "role": "neutral",
+        "displayName": "Chalk",
+        "canonical": "oklch(92.8% 0.008 91)",
+        "tonalRamp": [
+          "#0c0b07",
+          "#252420",
+          "#41403b",
+          "#5f5d58",
+          "#7f7d78",
+          "#a09e99",
+          "#c6c4be",
+          "#f0eee8"
+        ]
+      },
+      "fg-2": {
+        "role": "neutral",
+        "displayName": "Dim Chalk",
+        "canonical": "oklch(73.9% 0.007 248)",
+        "tonalRamp": [
+          "#090b0e",
+          "#212427",
+          "#3d4043",
+          "#5a5e62",
+          "#7a7e81",
+          "#9b9fa3",
+          "#c0c5c9",
+          "#ebeff3"
+        ]
+      },
+      "fg-3": {
+        "role": "neutral",
+        "displayName": "Muted Chalk",
+        "canonical": "oklch(63.7% 0.011 248)",
+        "tonalRamp": [
+          "#080c10",
+          "#202529",
+          "#3b4046",
+          "#595e64",
+          "#787e84",
+          "#999fa5",
+          "#bec5cb",
+          "#e9eff6"
+        ]
+      },
+      "paper": {
+        "role": "primary",
+        "displayName": "Thermal Paper",
+        "canonical": "oklch(94.3% 0.011 90)",
+        "tonalRamp": [
+          "#0d0b06",
+          "#26241e",
+          "#424039",
+          "#605d57",
+          "#807d76",
+          "#a19e97",
+          "#c7c4bc",
+          "#f1eee6"
+        ]
+      },
+      "paper-hi": {
+        "role": "primary",
+        "displayName": "Bright Paper",
+        "canonical": "oklch(99.4% 0.009 94)",
+        "tonalRamp": [
+          "#0c0b07",
+          "#25241f",
+          "#41403a",
+          "#5f5e58",
+          "#7f7d77",
+          "#a09e98",
+          "#c6c4bd",
+          "#f0eee7"
+        ]
+      },
+      "paper-2": {
+        "role": "primary",
+        "displayName": "Paper Shade",
+        "canonical": "oklch(90.7% 0.014 89)",
+        "tonalRamp": [
+          "#0e0b05",
+          "#27241c",
+          "#433f37",
+          "#615d55",
+          "#817d74",
+          "#a29e95",
+          "#c8c4ba",
+          "#f2eee4"
+        ]
+      },
+      "paper-line": {
+        "role": "primary",
+        "displayName": "Paper Crease",
+        "canonical": "oklch(82.1% 0.017 88)",
+        "tonalRamp": [
+          "#0e0b04",
+          "#27241a",
+          "#443f35",
+          "#625d53",
+          "#817d72",
+          "#a39e92",
+          "#c9c4b8",
+          "#f3eee2"
+        ]
+      },
+      "ink": {
+        "role": "primary",
+        "displayName": "Ticket Ink",
+        "canonical": "oklch(23.1% 0.004 264)",
+        "tonalRamp": [
+          "#0a0b0d",
+          "#232426",
+          "#3f4042",
+          "#5c5e60",
+          "#7c7d80",
+          "#9d9ea1",
+          "#c3c4c7",
+          "#edeef1"
+        ]
+      },
+      "ink-2": {
+        "role": "primary",
+        "displayName": "Faded Ink",
+        "canonical": "oklch(47.0% 0.008 97)",
+        "tonalRamp": [
+          "#0c0b08",
+          "#252420",
+          "#41403b",
+          "#5f5e59",
+          "#7e7d78",
+          "#a09e99",
+          "#c5c4be",
+          "#f0efe9"
+        ]
+      },
+      "ok": {
+        "role": "secondary",
+        "displayName": "Pass Green",
+        "canonical": "oklch(69.5% 0.181 146)",
+        "tonalRamp": [
+          "#001500",
+          "#003100",
+          "#004f0f",
+          "#276f30",
+          "#49904f",
+          "#6bb270",
+          "#90d994",
+          "#baffbd"
+        ]
+      },
+      "ok-ink": {
+        "role": "secondary",
+        "displayName": "Stamped Green",
+        "canonical": "oklch(51.0% 0.136 147)",
+        "tonalRamp": [
+          "#001500",
+          "#003100",
+          "#004f12",
+          "#226f32",
+          "#469051",
+          "#68b372",
+          "#8ed996",
+          "#b8ffc0"
+        ]
+      },
+      "warm": {
+        "role": "secondary",
+        "displayName": "Heat-Lamp Amber",
+        "canonical": "oklch(77.6% 0.146 71)",
+        "tonalRamp": [
+          "#260000",
+          "#451000",
+          "#653000",
+          "#874f00",
+          "#a96f16",
+          "#cd9141",
+          "#f5b668",
+          "#ffe192"
+        ]
+      },
+      "warm-ink": {
+        "role": "secondary",
+        "displayName": "Stamped Amber",
+        "canonical": "oklch(49.2% 0.107 65)",
+        "tonalRamp": [
+          "#250000",
+          "#441100",
+          "#653000",
+          "#864e01",
+          "#a96e30",
+          "#cc9052",
+          "#f5b678",
+          "#ffe0a1"
+        ]
+      },
+      "bad": {
+        "role": "secondary",
+        "displayName": "Ticket Red",
+        "canonical": "oklch(65.4% 0.193 25)",
+        "tonalRamp": [
+          "#2d0000",
+          "#4f0001",
+          "#721c1c",
+          "#963d39",
+          "#ba5e58",
+          "#df7f78",
+          "#ffa59c",
+          "#ffcfc6"
+        ]
+      },
+      "bad-soft": {
+        "role": "secondary",
+        "displayName": "Soft Red",
+        "canonical": "oklch(76.1% 0.142 23)",
+        "tonalRamp": [
+          "#2d0000",
+          "#4f0004",
+          "#721b20",
+          "#963d3d",
+          "#ba5d5c",
+          "#df7f7c",
+          "#ffa4a0",
+          "#ffcec9"
+        ]
+      },
+      "bad-ink": {
+        "role": "secondary",
+        "displayName": "Stamped Red",
+        "canonical": "oklch(52.8% 0.188 26)",
+        "tonalRamp": [
+          "#2d0000",
+          "#4f0000",
+          "#721c1b",
+          "#963d38",
+          "#ba5e57",
+          "#df7f77",
+          "#ffa59b",
+          "#ffcfc4"
+        ]
+      },
+      "idle": {
+        "role": "secondary",
+        "displayName": "Steel Grey",
+        "canonical": "oklch(54.8% 0.012 239)",
+        "tonalRamp": [
+          "#070c10",
+          "#1f2529",
+          "#3a4145",
+          "#585f63",
+          "#777e83",
+          "#98a0a5",
+          "#bec5cb",
+          "#e8f0f5"
+        ]
+      },
+      "idle-ink": {
+        "role": "secondary",
+        "displayName": "Stamped Grey",
+        "canonical": "oklch(47.5% 0.012 88)",
+        "tonalRamp": [
+          "#0d0b06",
+          "#26241e",
+          "#423f39",
+          "#605d56",
+          "#807d76",
+          "#a19e96",
+          "#c7c4bc",
+          "#f2eee6"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Large-ticket service name and first-run titles."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "View title in the top bar."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default UI text, menu items, inputs, ticket names in bold."
+      },
+      "body-sm": {
+        "displayName": "Body Small",
+        "purpose": "Buttons, hints, field labels, secondary metadata."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase section heads and pane headers; labels a region, never sits above a headline."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Logs, ports, PIDs, paths, commands, indexes."
+      },
+      "stamp": {
+        "displayName": "Stamp",
+        "purpose": "Outlined uppercase state marks on tickets."
+      }
+    },
+    "shadows": [
+      {
+        "name": "popover",
+        "value": "0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3)",
+        "purpose": "Menus and pickers."
+      },
+      {
+        "name": "toast",
+        "value": "0 10px 28px rgb(0 0 0 / 0.45)",
+        "purpose": "Bottom-right notifications."
+      },
+      {
+        "name": "palette",
+        "value": "0 24px 64px rgb(0 0 0 / 0.6)",
+        "purpose": "Command palette."
+      },
+      {
+        "name": "floating-pill",
+        "value": "0 6px 18px rgb(0 0 0 / 0.45)",
+        "purpose": "Log jump-to-latest pill."
+      },
+      {
+        "name": "segment-ring",
+        "value": "inset 0 0 0 1px var(--color-line-strong)",
+        "purpose": "Active segment edge; a border substitute, not elevation."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Default easing for entrances and the stamp."
+      },
+      {
+        "name": "stamp",
+        "value": "280ms ease-out, from scale(1.35) opacity 0",
+        "purpose": "Stamp press-in, only on an actual state change."
+      },
+      {
+        "name": "pop",
+        "value": "150ms ease-out, from translateY(-4px) opacity 0",
+        "purpose": "Popovers, palette, toasts and the jump pill entering."
+      },
+      {
+        "name": "spin-slow",
+        "value": "2.4s linear infinite",
+        "purpose": "Dashed status ring while starting or waiting."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "animation and transition durations 0.01ms",
+        "purpose": "Global guard under prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "xl",
+        "value": "1280px"
+      }
+    ],
+    "identityColors": [
+      "#7aa2f7",
+      "#e0b46c",
+      "#c49bf2",
+      "#4fc8d8",
+      "#f08a9b",
+      "#9fd36c",
+      "#ff9f6b",
+      "#6fd6bd",
+      "#d9a3e0",
+      "#a9b8d6"
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Paper button with ink text for the one main action of a view.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><polygon points=\"6 3 20 12 6 21 6 3\"/></svg> Run flow</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid; border-radius: 6px; font: 500 12px/1 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; white-space: nowrap; transition: background-color .15s, color .15s, border-color .15s; font-weight: 600; background: var(--color-paper); border-color: var(--color-paper); color: var(--color-ink); } .ds-btn-primary:hover { background: var(--color-paper-hi); } .ds-btn-primary:active { transform: translateY(1px); } .ds-btn-primary:focus-visible { outline: 2px solid var(--color-paper); outline-offset: 1px; }"
+    },
+    {
+      "name": "Default Button",
+      "kind": "button",
+      "refersTo": "button-default",
+      "description": "Raised-steel button for secondary actions.",
+      "html": "<button class=\"ds-btn-default\">Add services</button>",
+      "css": ".ds-btn-default { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid; border-radius: 6px; font: 500 12px/1 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; white-space: nowrap; transition: background-color .15s, color .15s, border-color .15s; background: var(--color-surface-2); border-color: var(--color-line-strong); color: var(--color-fg); } .ds-btn-default:hover { background: var(--color-surface-3); } .ds-btn-default:active { transform: translateY(1px); } .ds-btn-default:focus-visible { outline: 2px solid var(--color-paper); outline-offset: 1px; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive action on steel, such as Stop all.",
+      "html": "<button class=\"ds-btn-danger\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\"/></svg> Stop all</button>",
+      "css": ".ds-btn-danger { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid; border-radius: 6px; font: 500 12px/1 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; white-space: nowrap; transition: background-color .15s, color .15s, border-color .15s; height: 24px; padding: 0 8px; background: var(--color-surface-2); border-color: var(--color-line-strong); color: var(--color-bad-soft); } .ds-btn-danger:hover { border-color: rgb(239 83 80 / 0.4); background: rgb(239 83 80 / 0.1); } .ds-btn-danger:focus-visible { outline: 2px solid var(--color-paper); outline-offset: 1px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Borderless low-emphasis action in pane headers.",
+      "html": "<button class=\"ds-btn-ghost\">Edit steps</button>",
+      "css": ".ds-btn-ghost { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid; border-radius: 6px; font: 500 12px/1 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; white-space: nowrap; transition: background-color .15s, color .15s, border-color .15s; height: 24px; padding: 0 8px; background: transparent; border-color: transparent; color: var(--color-fg-2); } .ds-btn-ghost:hover { background: var(--color-surface-2); color: var(--color-fg); } .ds-btn-ghost:focus-visible { outline: 2px solid var(--color-paper); outline-offset: 1px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Rail-black field; focus turns the border paper.",
+      "html": "<input class=\"ds-input\" placeholder=\"npm run dev\" />",
+      "css": ".ds-input { height: 32px; width: 100%; padding: 0 10px; border: 1px solid var(--color-line-strong); border-radius: 6px; background: var(--color-rail); color: var(--color-fg); font: 400 13px/1.45 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; transition: border-color .15s, background-color .15s; } .ds-input::placeholder { color: var(--color-fg-3); } .ds-input:hover { border-color: #3d4348; } .ds-input:focus { outline: none; border-color: rgb(239 236 228 / 0.7); background: #0b0d0e; }"
+    },
+    {
+      "name": "Sidebar Service Row",
+      "kind": "nav",
+      "refersTo": "sidebar-row",
+      "description": "Status mark, 3px identity bar, name and last log line, with a row action.",
+      "html": "<div class=\"ds-nav\"><a class=\"ds-nav-row ds-nav-row-active\" href=\"#\"><svg width=\"10\" height=\"10\" viewBox=\"0 0 10 10\" class=\"ds-ok\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"5\" r=\"4\" fill=\"currentColor\"/></svg><span class=\"ds-idbar\" style=\"background:#7aa2f7\"></span><span class=\"ds-nav-text\"><span class=\"ds-nav-name\">api-gateway</span><span class=\"ds-nav-line\">GET /health 200 93ms</span></span></a><a class=\"ds-nav-row\" href=\"#\"><svg width=\"10\" height=\"10\" viewBox=\"0 0 10 10\" class=\"ds-idle\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"5\" r=\"3.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/></svg><span class=\"ds-idbar\" style=\"background:#e0b46c\"></span><span class=\"ds-nav-text\"><span class=\"ds-nav-name\">pricing-model</span></span></a></div>",
+      "css": ".ds-nav { display: grid; gap: 2px; width: 256px; padding: 8px; background: var(--color-rail); } .ds-nav-row { display: flex; align-items: flex-start; gap: 10px; min-height: 30px; padding: 6px 8px; border-radius: 6px; color: var(--color-fg-2); text-decoration: none; font: 500 13px/1.45 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; transition: background-color .15s, color .15s; } .ds-nav-row:hover { background: var(--color-surface-2); color: var(--color-fg); } .ds-nav-row-active, .ds-nav-row-active:hover { background: var(--color-surface-3); color: var(--color-fg); } .ds-nav-row:focus-visible { outline: 2px solid var(--color-paper); outline-offset: 1px; } .ds-nav-row svg { margin-top: 4px; flex: none; } .ds-ok { color: var(--color-ok); } .ds-idle { color: var(--color-idle); } .ds-idbar { width: 3px; height: 12px; margin-top: 3px; border-radius: 9999px; flex: none; } .ds-nav-text { display: grid; min-width: 0; } .ds-nav-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-nav-line { font: 400 11px/1.45 \"JetBrains Mono\", ui-monospace, \"SF Mono\", Menlo, monospace; color: var(--color-fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }"
+    },
+    {
+      "name": "Ticket",
+      "kind": "custom",
+      "refersTo": "ticket-header",
+      "description": "The signature: a paper ticket hanging from the 2px rail bar, with identity bar, mono index, name, metadata and stamped state.",
+      "html": "<section class=\"ds-lane\"><div class=\"ds-railbar\"></div><header class=\"ds-ticket\"><div class=\"ds-ticket-main\"><div class=\"ds-ticket-name\"><span class=\"ds-idbar-t\" style=\"background:#c49bf2\"></span><span class=\"ds-index\">02</span><span class=\"ds-name\">auth-service</span></div><div class=\"ds-meta\"><a href=\"#\" class=\"ds-port\">:3001</a><span>NestJS</span><span>up 1m 54s</span></div></div><div class=\"ds-ticket-side\"><span class=\"ds-stamp\"><svg width=\"7\" height=\"7\" viewBox=\"0 0 7 7\" aria-hidden=\"true\"><circle cx=\"3.5\" cy=\"3.5\" r=\"2.5\" fill=\"currentColor\"/></svg>Running</span><button class=\"ds-tbtn\" aria-label=\"Restart\"><svg width=\"13\" height=\"13\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/></svg></button></div></header><pre class=\"ds-log\">2026-10-23T07:11:29Z GET /health 200 4ms\n2026-10-23T07:11:32Z GET /health 200 3ms</pre></section>",
+      "css": ".ds-lane { width: 340px; background: var(--color-rail); } .ds-railbar { height: 2px; background: #3a3f44; } .ds-ticket { display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 10px; background: var(--color-paper); color: var(--color-ink); font-family: -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; } .ds-ticket-main { flex: 1; min-width: 0; } .ds-ticket-name { display: flex; align-items: baseline; gap: 8px; } .ds-idbar-t { width: 3px; align-self: stretch; margin: 2px 0; border-radius: 9999px; flex: none; } .ds-index { font: 600 12px \"JetBrains Mono\", ui-monospace, \"SF Mono\", Menlo, monospace; color: var(--color-ink-2); font-variant-numeric: tabular-nums; } .ds-name { font: 700 13px/1.45 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; letter-spacing: -0.025em; } .ds-meta { display: flex; gap: 10px; margin-top: 4px; font: 400 11px/1.45 \"JetBrains Mono\", ui-monospace, \"SF Mono\", Menlo, monospace; color: var(--color-ink-2); } .ds-port { font-weight: 600; color: var(--color-ink); text-decoration: underline; text-decoration-color: var(--color-paper-line); text-underline-offset: 2px; } .ds-port:hover { text-decoration-color: var(--color-ink); } .ds-port:focus-visible, .ds-tbtn:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 1px; } .ds-ticket-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; } .ds-stamp { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; border: 1.5px solid currentColor; border-radius: 3px; color: var(--color-ok-ink); font: 600 11px/18px \"JetBrains Mono\", ui-monospace, \"SF Mono\", Menlo, monospace; letter-spacing: 0.08em; text-transform: uppercase; animation: ds-stamp .28s cubic-bezier(0.16, 1, 0.3, 1); } @keyframes ds-stamp { from { opacity: 0; transform: scale(1.35); } } @media (prefers-reduced-motion: reduce) { .ds-stamp { animation: none; } } .ds-tbtn { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 4px; background: transparent; color: var(--color-ink-2); transition: background-color .15s, color .15s; } .ds-tbtn:hover { background: rgb(201 196 184 / 0.6); color: var(--color-ink); } .ds-log { margin: 0; padding: 6px 12px; font: 400 12px/18px \"JetBrains Mono\", ui-monospace, \"SF Mono\", Menlo, monospace; color: var(--color-fg); }"
+    },
+    {
+      "name": "Status Stamps",
+      "kind": "chip",
+      "refersTo": "stamp",
+      "description": "State marks: shape plus ink twin, outlined in their own colour.",
+      "html": "<div class=\"ds-stamps\"><span class=\"ds-st ds-st-ok\"><svg width=\"7\" height=\"7\" viewBox=\"0 0 7 7\"><circle cx=\"3.5\" cy=\"3.5\" r=\"2.5\" fill=\"currentColor\"/></svg>Running</span><span class=\"ds-st ds-st-warm\"><svg width=\"7\" height=\"7\" viewBox=\"0 0 7 7\"><circle cx=\"3.5\" cy=\"3.5\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-dasharray=\"2.4 1.8\"/></svg>Starting</span><span class=\"ds-st ds-st-bad\"><svg width=\"7\" height=\"7\" viewBox=\"0 0 7 7\"><circle cx=\"3.5\" cy=\"3.5\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\"/><path d=\"M1.75 5.25L5.25 1.75\" stroke=\"currentColor\" stroke-width=\"1.6\"/></svg>Crashed</span><span class=\"ds-st ds-st-idle\"><svg width=\"7\" height=\"7\" viewBox=\"0 0 7 7\"><circle cx=\"3.5\" cy=\"3.5\" r=\"2\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/></svg>Stopped</span></div>",
+      "css": ".ds-stamps { display: flex; gap: 8px; padding: 12px; background: var(--color-paper); } .ds-st { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; border: 1.5px solid currentColor; border-radius: 3px; font: 600 11px/18px \"JetBrains Mono\", ui-monospace, \"SF Mono\", Menlo, monospace; letter-spacing: 0.08em; text-transform: uppercase; } .ds-st-ok { color: var(--color-ok-ink); } .ds-st-warm { color: var(--color-warm-ink); } .ds-st-bad { color: var(--color-bad-ink); } .ds-st-idle { color: var(--color-idle-ink); }"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "refersTo": "segmented",
+      "description": "Layout switch (Columns / Grid / Merged) on a rail-black track.",
+      "html": "<div class=\"ds-seg\" role=\"group\" aria-label=\"Layout\"><button class=\"ds-seg-btn\" aria-pressed=\"true\">Columns</button><button class=\"ds-seg-btn\" aria-pressed=\"false\">Grid</button><button class=\"ds-seg-btn\" aria-pressed=\"false\">Merged</button></div>",
+      "css": ".ds-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--color-line); border-radius: 6px; background: var(--color-rail); } .ds-seg-btn { height: 22px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; color: var(--color-fg-3); font: 500 12px/1 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; transition: color .15s, background-color .15s; } .ds-seg-btn:hover { color: var(--color-fg); } .ds-seg-btn[aria-pressed=true] { background: var(--color-surface-3); color: var(--color-fg); box-shadow: inset 0 0 0 1px var(--color-line-strong); } .ds-seg-btn:focus-visible { outline: 2px solid var(--color-paper); outline-offset: 1px; }"
+    },
+    {
+      "name": "Popover Menu",
+      "kind": "card",
+      "refersTo": "popover",
+      "description": "Floating menu; one of the few layers allowed a shadow.",
+      "html": "<div class=\"ds-pop\" role=\"menu\"><div class=\"ds-pop-label\">Workspaces</div><button class=\"ds-pop-item\">code</button><button class=\"ds-pop-item\">side-projects</button><div class=\"ds-pop-sep\"></div><button class=\"ds-pop-item ds-pop-danger\">Delete flow</button></div>",
+      "css": ".ds-pop { width: 240px; padding: 4px; border: 1px solid var(--color-line-strong); border-radius: 8px; background: var(--color-pop); box-shadow: 0 12px 32px rgb(0 0 0 / 0.5), 0 2px 6px rgb(0 0 0 / 0.3); } .ds-pop-label { padding: 6px 8px 4px; font: 600 11px/1.45 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-fg-3); } .ds-pop-item { display: flex; width: 100%; min-height: 30px; align-items: center; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--color-fg); font: 400 13px/1.45 -apple-system, BlinkMacSystemFont, \"SF Pro Text\", \"Segoe UI\", Roboto, sans-serif; text-align: left; } .ds-pop-item:hover { background: var(--color-surface-3); } .ds-pop-item:focus-visible { outline: 2px solid var(--color-paper); outline-offset: 1px; } .ds-pop-danger { color: var(--color-bad-soft); } .ds-pop-sep { height: 1px; margin: 4px 0; background: var(--color-line); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Pass",
+    "overview": "Auxin is a kitchen expo pass for local services. Every service is a thermal-paper ticket clipped to a steel rail; its log prints downward beneath it like a receipt. The shell is brushed steel, dark and quiet, so the paper tickets and their stamped state marks are the brightest things on screen. A developer glances across the rail and reads the state of the whole stack the way an expediter reads the pass.\n\nThe system is dense and desktop-native. Body text is 13px system sans, rows are 30px, controls are 24 to 28px tall, and one mono face (JetBrains Mono) is reserved for machine output: logs, ports, PIDs, indexes, paths, commands, and the stamps. Structure comes from single hairlines and tonal steps of steel, never from stacked cards. Depth exists only where something floats.\n\nTwo materials carry meaning. Steel is the room; paper is the thing being worked on. Anything printed on paper switches to the ink palette and the darker state twins, and takes an ink focus ring.",
+    "keyCharacteristics": [
+      "Brushed-steel dark shell in five tonal steps, divided by single 1px hairlines.",
+      "Thermal-paper ticket headers in warm off-white with near-black ink.",
+      "Stamped uppercase state marks in mono, outlined in their own ink.",
+      "Status carried by shape as well as hue: solid, dashed ring, struck ring, hollow ring.",
+      "A stable identity colour per service, always shown as a 3px rounded bar.",
+      "A stable two-digit index per service, set in mono.",
+      "Shadows only on floating layers."
+    ],
+    "rules": [
+      {
+        "name": "The Twin Rule",
+        "body": "Every state hue has a darker ink twin. Use the hue on steel and the twin on paper; a bright hue printed on paper is illegible.",
+        "section": "colors"
+      },
+      {
+        "name": "The Amber Is Attention Rule",
+        "body": "Heat-lamp amber means \"in progress\" or \"look at this\": starting and waiting states, a pending-restart banner, a missing command. It is never a focus colour, a selection colour, or a decorative accent.",
+        "section": "colors"
+      },
+      {
+        "name": "The Paper Is the Accent Rule",
+        "body": "The only non-state accent is paper. Primary actions are paper buttons with ink text; there is no blue.",
+        "section": "colors"
+      },
+      {
+        "name": "The Machine Speaks Mono Rule",
+        "body": "Mono is for what the machine printed or uses as an identifier. Never set UI prose or headings in mono.",
+        "section": "typography"
+      },
+      {
+        "name": "The Small Scale Rule",
+        "body": "The ramp runs from 11px to 22px. Nothing in the app is display-sized; hierarchy comes from weight and material, not size.",
+        "section": "typography"
+      },
+      {
+        "name": "The Only Floaters Cast Shadows Rule",
+        "body": "A shadow means the element floats above the window: popovers, the palette, toasts, the log jump pill. Panes, tickets, rows and cards never cast one.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Single Hairline Rule",
+        "body": "Regions are divided by one 1px hairline. Never double a border by nesting bordered cards.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** put a service's state on paper as an outlined uppercase mono stamp in the state's ink twin (ok-ink, warm-ink, bad-ink, idle-ink).",
+      "**Do** pair every status hue with its StatusMark shape so state reads without colour.",
+      "**Do** show service identity as the 3px fully rounded identity bar, and the index as a two-digit mono number.",
+      "**Do** hang every ticket from a flat 2px rail-bar (#3a3f44) and divide lanes with a 1px hairline gap.",
+      "**Do** wrap paper surfaces in `.on-paper` so focus rings turn ink; on steel the focus ring is a 2px paper outline.",
+      "**Do** keep amber for in-progress states and things that need attention.",
+      "**Do** animate a stamp only when its state changes, and keep the reduced-motion guard."
+    ],
+    "donts": [
+      "**Don't** use amber for focus, selection, toggled controls or decoration.",
+      "**Don't** cast shadows from panes, tickets, rows or cards; shadows belong only to popovers, the palette, toasts and the log jump pill.",
+      "**Don't** stack bordered cards inside bordered panes; one hairline divides one region.",
+      "**Don't** set UI prose, names or headings in mono; mono is for machine output and identifiers.",
+      "**Don't** print bright state hues on paper or ink twins on steel.",
+      "**Don't** tilt the stamp or add gradient clips or perforation edges to tickets; the finish review removed all three, and the ticket is now a flat paper header on a flat rail.",
+      "**Don't** introduce text darker than fg-3 (#868c92) on steel."
+    ]
+  }
+}

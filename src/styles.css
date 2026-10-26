@@ -1,0 +1,156 @@
+@import "tailwindcss";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/600.css";
+
+/* The Pass: brushed-steel shell, thermal-paper tickets, stamped state. */
+@theme {
+  --color-bg: #121416;
+  --color-rail: #0d0f11;
+  --color-surface: #171a1d;
+  --color-surface-2: #1d2124;
+  --color-surface-3: #252a2e;
+  --color-pop: #1b1e21;
+  --color-line: #24282c;
+  --color-line-strong: #32373c;
+  --color-fg: #e9e7e1;
+  --color-fg-2: #a7abaf;
+  --color-fg-3: #868c92;
+
+  --color-paper: #efece4;
+  --color-paper-hi: #fffdf6;
+  --color-paper-2: #e4e0d6;
+  --color-paper-line: #c9c4b8;
+  --color-ink: #1c1d1f;
+  --color-ink-2: #5c5b56;
+
+  /* State: hue on steel, darker twin on paper */
+  --color-ok: #3fb950;
+  --color-ok-ink: #1d7a33;
+  --color-warm: #f0a43a;
+  --color-warm-ink: #8a5208;
+  --color-bad: #ef5350;
+  --color-bad-soft: #ff8a87;
+  --color-bad-ink: #c0282a;
+  --color-idle: #6b7277;
+  --color-idle-ink: #5f5c55;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-2xs: 0.625rem;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.75rem;
+  --text-base: 0.8125rem;
+  --text-lg: 0.9375rem;
+  --text-xl: 1.125rem;
+  --text-2xl: 1.375rem;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --animate-pop: pop 0.15s var(--ease-out);
+  --animate-spin-slow: spin 2.4s linear infinite;
+  --animate-stamp: stamp 0.28s var(--ease-out);
+
+  /* A state change lands like a stamp: slightly large, then pressed flat. */
+  @keyframes stamp {
+    from {
+      opacity: 0;
+      transform: scale(1.35);
+    }
+  }
+  @keyframes dash {
+    to {
+      stroke-dashoffset: -18;
+    }
+  }
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg font-sans text-base leading-[1.45] text-fg antialiased;
+    overflow: hidden;
+    user-select: none;
+    cursor: default;
+  }
+  input,
+  textarea {
+    user-select: text;
+    caret-color: var(--color-fg);
+  }
+  button:not(:disabled) {
+    cursor: default;
+  }
+  ::selection {
+    background: rgb(239 236 228 / 0.22);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-paper);
+    outline-offset: 1px;
+  }
+  select {
+    padding-right: 28px !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none' stroke='%23a7abaf' stroke-width='1.5'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+  /* Paper surfaces take an ink focus ring; paper-on-paper would vanish. */
+  .on-paper :focus-visible {
+    outline-color: var(--color-ink);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+  mark {
+    background: rgb(240 164 58 / 0.3);
+    color: inherit;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-3);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 12px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-line-strong);
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+/* The steel rail the tickets hang from. */
+@utility rail-bar {
+  height: 2px;
+  background: #3a3f44;
+}
+
+/* Stamped state: inked outline on paper. */
+@utility stamp {
+  border: 1.5px solid currentColor;
+}

@@ -1,0 +1,302 @@
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { HttpRequest, HttpResponse } from "../lib/api";
+
+const http = vi.hoisted(() => ({ handler: (_r: HttpRequest): Promise<HttpResponse> => Promise.reject("unset"), sent: [] as HttpRequest[], writes: [] as [string, string][], disk: [] as [string, string][], filesChanged: null as null | ((root: string) => void) }));
+
+vi.mock("../lib/api", () => ({
+  api: {
+    httpSend: vi.fn((req: HttpRequest) => {
+      http.sent.push(req);
+      return http.handler(req);
+    }),
+    httpCancel: vi.fn(async () => true),
+    httpDropJar: vi.fn(async () => undefined),
+    auxinWrite: vi.fn(async (_root: string, path: string, text: string) => void http.writes.push([path, text])),
+    auxinListDir: vi.fn(async () => []),
+    auxinDelete: vi.fn(async () => undefined),
+    auxinRead: vi.fn(async () => "{}"),
+    auxinList: vi.fn(async () => http.disk.map(([path, text]) => ({ path, text }))),
+    auxinWatch: vi.fn(async () => undefined),
+    onFilesChanged: vi.fn(async (cb: (root: string) => void) => {
+      http.filesChanged = cb;
+      return () => undefined;
+    }),
+    sampleConnections: vi.fn(async () => []),
+    saveConfig: vi.fn(async () => undefined),
+  },
+}));
+
+import { appendLogs } from "../state/logs";
+import { useStore } from "../state/store";
+import { blankStep, newFlow, parseEnv, type FlowDoc, type FlowStep } from "./model";
+import { cancelRun, cancelStep, runFlow, sendStep } from "./runner";
+import { rk, saveEnv, syncWorkspace, updateFlow, useFlows } from "./store";
+
+const ROOT = "/w";
+const res = (status: number, body: unknown, extra: Partial<HttpResponse> = {}): HttpResponse => {
+  const text = JSON.stringify(body);
+  return { status, statusText: "", headers: [["content-type", "application/json"]], contentType: "application/json", bodyText: text, bodyBase64: null, size: text.length, truncated: false, fullBodyPath: null, firstByteMs: 5, totalMs: 12, ...extra };
+};
+const step = (p: Partial<FlowStep>): FlowStep => ({ ...blankStep(1), ...p });
+
+function setup(steps: FlowStep[], opts: Partial<FlowDoc> = {}) {
+  const doc: FlowDoc = { ...newFlow("flows/e2e.flow.json", "E2E"), graceMs: 0, steps, ...opts };
+  useStore.setState({
+    config: { version: 1, activeWorkspaceId: "w", workspaces: [{ id: "w", root: ROOT, name: "w", overrides: {}, manual: [], hidden: [], groups: [] }] },
+    detected: [
+      { id: `${ROOT}/gw`, name: "gw", path: `${ROOT}/gw`, kind: "node", framework: null, suggestions: [], defaultCommand: "x", venv: null, portHint: 4000 },
+      { id: `${ROOT}/model`, name: "model", path: `${ROOT}/model`, kind: "python", framework: null, suggestions: [], defaultCommand: "x", venv: null, portHint: 8000 },
+    ],
+    runtime: { [`${ROOT}/gw`]: { status: "running", pid: 1 }, [`${ROOT}/model`]: { status: "running", pid: 2 } },
+  });
+  useFlows.setState({
+    root: ROOT,
+    loaded: true,
+    flows: { [doc.path]: doc },
+    envs: { local: { ...parseEnv("local"), vars: { region: "EU" }, secrets: { token: "s3cret-token" } } },
+    responses: {},
+    runs: {},
+    extracted: {},
+    invalid: {},
+    broken: {},
+  });
+  return doc;
+}
+
+const out = (id: string) => useFlows.getState().responses[rk("flows/e2e.flow.json", id)];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+beforeEach(() => {
+  http.sent = [];
+  http.writes = [];
+  http.disk = [];
+});
+
+describe("runFlow", () => {
+  it("chains extracted values, polls until done, checks, and records history", async () => {
+    let polls = 0;
+    http.handler = async (r) => {
+      if (r.method === "POST") return res(202, { jobId: "8f2c1e" });
+      if (r.url.endsWith("/jobs/8f2c1e")) return res(200, { status: ++polls >= 3 ? "done" : "running" });
+      return res(200, { items: new Array(24).fill(1) });
+    };
+    const doc = setup([
+      step({ id: "a", method: "POST", url: "{{gw}}/jobs", headers: [{ key: "Authorization", value: "Bearer {{token}}" }], body: { kind: "json", text: '{"region":"{{region}}"}', form: [], file: "" }, extract: [{ key: "jobId", value: "body.jobId" }], checks: [{ left: "status", op: "==", right: "202" }] }),
+      step({ id: "b", url: "{{model}}/jobs/{{jobId}}", poll: { until: [{ left: "body.status", op: "==", right: '"done"' }], everyMs: 10, maxTries: 5 } }),
+      step({ id: "c", url: "{{gw}}/results/{{jobId}}", checks: [{ left: "body.items", op: "length ==", right: "24" }] }),
+    ]);
+    await runFlow(doc.path);
+
+    expect(useFlows.getState().runs[doc.path].status).toBe("passed");
+    expect(http.sent[0]).toMatchObject({ method: "POST", url: "http://localhost:4000/jobs", body: { kind: "text", value: '{"region":"EU"}' } });
+    expect(http.sent[1].url).toBe("http://localhost:8000/jobs/8f2c1e");
+    expect(out("b").tries).toBe(3);
+    expect(http.sent.filter((r) => r.url.endsWith("/jobs/8f2c1e"))).toHaveLength(3);
+    expect(out("c").state).toBe("passed");
+    // Trace headers and a shared cookie jar for the run.
+    const h = Object.fromEntries(http.sent[0].headers);
+    expect(h["X-Request-ID"]).toMatch(/^aux-[0-9a-f]{8}$/);
+    expect(h.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    expect(new Set(http.sent.map((r) => r.cookieJar)).size).toBe(1);
+    // Secrets go out for real but are masked in what the UI shows.
+    expect(h.Authorization).toBe("Bearer s3cret-token");
+    expect(out("a").headers.find(([k]) => k === "Authorization")?.[1]).toBe("Bearer ••••••");
+    // History: one record, values not stored (only extracted names).
+    const hist = http.writes.find(([p]) => p.startsWith("runs/e2e/"));
+    expect(hist).toBeTruthy();
+    const rec = JSON.parse(hist![1]);
+    expect(rec.status).toBe("passed");
+    expect(rec.steps[0].extracted).toEqual(["jobId"]);
+    expect(hist![1]).not.toContain("s3cret-token");
+  });
+
+  it("stops at the first failing check and skips the rest", async () => {
+    http.handler = async () => res(500, { error: "boom" });
+    const doc = setup([step({ id: "a", url: "{{gw}}/x" }), step({ id: "b", url: "{{gw}}/y" })]);
+    await runFlow(doc.path);
+    expect(out("a")).toMatchObject({ state: "failed", checks: [{ label: "status < 400", ok: false, got: "500" }] });
+    expect(out("b").state).toBe("skipped");
+    expect(useFlows.getState().runs[doc.path].status).toBe("failed");
+    expect(http.sent).toHaveLength(1);
+  });
+
+  it("fails a poll that never meets its condition, saying how many tries", async () => {
+    http.handler = async () => res(200, { status: "running" });
+    const doc = setup([step({ id: "a", url: "{{gw}}/jobs/1", poll: { until: [{ left: "body.status", op: "==", right: '"done"' }], everyMs: 5, maxTries: 3 } })]);
+    await runFlow(doc.path);
+    expect(http.sent).toHaveLength(3);
+    expect(out("a").state).toBe("failed");
+    expect(out("a").checks[0]).toMatchObject({ ok: false, got: expect.stringContaining("not met after 3 tries") });
+  });
+
+  it("fails when an extract path is missing, so later requests don't run with a hole", async () => {
+    http.handler = async () => res(200, { other: 1 });
+    const doc = setup([step({ id: "a", url: "{{gw}}/a", extract: [{ key: "jobId", value: "body.jobId" }] }), step({ id: "b", url: "{{gw}}/b/{{jobId}}" })]);
+    await runFlow(doc.path);
+    expect(out("a").checks[out("a").checks.length - 1]).toMatchObject({ label: "extract jobId", ok: false });
+    expect(out("b").state).toBe("skipped");
+  });
+
+  it("explains a connection refusal and remembers the port", async () => {
+    http.handler = async () => Promise.reject("Couldn't connect to localhost:4000. Is the service running?");
+    const doc = setup([step({ id: "a", url: "{{gw}}/a" })]);
+    await runFlow(doc.path);
+    expect(out("a")).toMatchObject({ state: "error", refusedPort: 4000 });
+  });
+
+  it("can be cancelled mid-poll", async () => {
+    http.handler = async () => res(200, { status: "running" });
+    const doc = setup([step({ id: "a", url: "{{gw}}/jobs/1", poll: { until: [{ left: "body.status", op: "==", right: '"done"' }], everyMs: 50, maxTries: 100 } }), step({ id: "b", url: "{{gw}}/b" })]);
+    const p = runFlow(doc.path);
+    await new Promise((r) => setTimeout(r, 80));
+    cancelRun(doc.path);
+    await p;
+    expect(out("a").state).toBe("cancelled");
+    expect(out("b").state).toBe("cancelled");
+    expect(useFlows.getState().runs[doc.path].status).toBe("cancelled");
+    expect(http.sent.length).toBeLessThan(10);
+  });
+
+  it("traces through the services' logs and records traffic directions", async () => {
+    http.handler = async (r) => {
+      const rid = r.headers.find(([k]) => k === "X-Request-ID")![1];
+      appendLogs([
+        { id: `${ROOT}/gw`, stream: "stdout", text: `POST /jobs req=${rid}`, ts: Date.now() },
+        { id: `${ROOT}/model`, stream: "stdout", text: `model got req=${rid}`, ts: Date.now() + 2 },
+        { id: `${ROOT}/model`, stream: "stderr", text: "ERROR job 8f2c1e failed", ts: Date.now() + 4 },
+      ]);
+      return res(202, { jobId: "8f2c1e" });
+    };
+    const doc = setup([step({ id: "a", method: "POST", url: "{{gw}}/jobs" })], { services: [{ ref: "gw", alias: "gw" }, { ref: "model", alias: "model" }], graceMs: 5 });
+    await runFlow(doc.path);
+    const t = out("a").trace!;
+    expect(t.hops.map((h) => [h.alias, h.ok])).toEqual([
+      ["gw", true],
+      ["model", false],
+    ]);
+    expect(t.lines).toHaveLength(3);
+    expect(t.traffic).toEqual([["gw", "model"]]);
+    await new Promise((r) => setTimeout(r, 350)); // flow file edits are debounced
+    expect(useFlows.getState().flows[doc.path].directions).toEqual([expect.objectContaining({ from: "gw", to: "model", source: "traffic", confirmed: false })]);
+  });
+});
+
+describe("sendStep", () => {
+  it("explains a value that comes from an earlier request, and uses it once that request was sent", async () => {
+    http.handler = async (r) => (r.url.endsWith("/a") ? res(200, { id: "abc12345" }) : res(200, {}));
+    const doc = setup([step({ id: "a", url: "{{gw}}/a", extract: [{ key: "jobId", value: "body.id" }] }), step({ id: "b", url: "{{gw}}/b/{{jobId}}" })]);
+    await sendStep(doc.path, doc.steps[1]);
+    expect(out("b")).toMatchObject({ state: "error", error: expect.stringContaining("comes from an earlier request") });
+    expect(http.sent).toHaveLength(0);
+    await sendStep(doc.path, doc.steps[0]);
+    await sendStep(doc.path, doc.steps[1]);
+    expect(http.sent[http.sent.length - 1].url).toBe("http://localhost:4000/b/abc12345");
+  });
+});
+
+describe("review regressions", () => {
+  it("keeps secrets out of error text and run history", async () => {
+    http.handler = async (r) => Promise.reject(`Request to localhost:4000 failed: connection closed (${r.url})`);
+    const doc = setup([step({ id: "a", url: "{{gw}}/x?key={{token}}", checks: [{ left: "body.token", op: "exists", right: "" }] })]);
+    await runFlow(doc.path);
+    expect(out("a").error).not.toContain("s3cret-token");
+    expect(out("a").error).toContain("••••••");
+    const hist = http.writes.find(([p]) => p.startsWith("runs/"))![1];
+    expect(hist).not.toContain("s3cret-token");
+  });
+
+  it("history stores status/time readings but not other response values", async () => {
+    http.handler = async () => res(200, { accessToken: "tok_live_ABCDEF123456" });
+    const doc = setup([step({ id: "a", url: "{{gw}}/login", checks: [{ left: "status", op: "==", right: "200" }, { left: "body.accessToken", op: "==", right: '"x"' }] })]);
+    await runFlow(doc.path);
+    const rec = JSON.parse(http.writes.find(([p]) => p.startsWith("runs/"))![1]);
+    expect(rec.steps[0].checks[0].got).toBe("200");
+    expect(rec.steps[0].checks[1].got).toBe("");
+    expect(JSON.stringify(rec)).not.toContain("tok_live");
+  });
+
+  it("refuses single sends during a run, and Cancel during a run stops the run without poisoning later sends", async () => {
+    let n = 0;
+    http.handler = async () => {
+      n++;
+      await sleep(60);
+      return res(200, {});
+    };
+    const doc = setup([step({ id: "a", url: "{{gw}}/a" }), step({ id: "b", url: "{{gw}}/b" })]);
+    const p = runFlow(doc.path);
+    await sleep(10);
+    await sendStep(doc.path, doc.steps[0]); // ignored: the flow is running
+    cancelStep(doc.path, "a"); // routes to the run
+    await p;
+    expect(useFlows.getState().runs[doc.path].status).toBe("cancelled");
+    expect(n).toBe(1);
+    await sendStep(doc.path, doc.steps[0]);
+    expect(out("a").state).toBe("passed");
+  });
+
+  it("history records the run's own outcome, not a send made during the trace grace period", async () => {
+    let calls = 0;
+    http.handler = async () => (++calls === 1 ? res(200, {}) : res(500, {}));
+    const doc = setup([step({ id: "a", url: "{{gw}}/a" })], { graceMs: 80 });
+    const p = runFlow(doc.path);
+    await sleep(40);
+    await sendStep(doc.path, doc.steps[0]); // run has finished its requests; this one returns 500
+    await p;
+    const rec = JSON.parse(http.writes.find(([q]) => q.startsWith("runs/"))![1]);
+    expect(rec.status).toBe("passed");
+    expect(rec.steps[0].status).toBe(200);
+  });
+
+  it("doesn't use common words from extracted values as trace matches", async () => {
+    http.handler = async (r) => {
+      appendLogs([{ id: `${ROOT}/model`, stream: "stdout", text: "worker still running", ts: Date.now() }]);
+      return r.url.endsWith("/a") ? res(200, { status: "running" }) : res(200, {});
+    };
+    const doc = setup([step({ id: "a", url: "{{gw}}/a", extract: [{ key: "st", value: "body.status" }] })], { services: [{ ref: "gw", alias: "gw" }, { ref: "model", alias: "model" }], graceMs: 5 });
+    await runFlow(doc.path);
+    expect(out("a").trace!.lines).toEqual([]);
+  });
+
+  it("a running service wins its port over a stopped service's hint", async () => {
+    setup([]);
+    useStore.setState((s) => ({
+      detected: [...s.detected, { id: `${ROOT}/ml`, name: "ml", path: `${ROOT}/ml`, kind: "python", framework: null, suggestions: [], defaultCommand: "x", venv: null, portHint: 9000 }],
+      runtime: { ...s.runtime, [`${ROOT}/model`]: { status: "running", pid: 2, port: 9000 } },
+    }));
+    const { servicePorts } = await import("./store");
+    expect(servicePorts().portToService[9000]).toBe("model");
+  });
+});
+
+describe("disk sync", () => {
+  const FLOW = "flows/e2e.flow.json";
+
+  it("a reload never drops edits that haven't been saved yet", async () => {
+    http.disk = [[FLOW, JSON.stringify({ version: 1, name: "From disk", steps: [] })]];
+    await syncWorkspace(null);
+    await syncWorkspace(ROOT);
+    expect(useFlows.getState().flows[FLOW].name).toBe("From disk");
+    updateFlow(FLOW, (f) => ({ ...f, name: "Typed by me" }));
+    // Another file in .auxin changes (say, a run's history) before our save fires.
+    http.disk.push(["env/local.json", "{}"]);
+    http.filesChanged!(ROOT);
+    await sleep(270); // the watcher's debounce, then the reload
+    expect(useFlows.getState().flows[FLOW].name).toBe("Typed by me");
+    await sleep(150);
+    expect(http.writes.some(([p, t]) => p === FLOW && t.includes("Typed by me"))).toBe(true);
+  });
+
+  it("removing the last secret rewrites the secret file instead of leaving it", async () => {
+    http.disk = [
+      ["env/local.json", JSON.stringify({ vars: {} })],
+      ["env/local.secret.json", JSON.stringify({ vars: { token: "old" } })],
+    ];
+    await syncWorkspace(null);
+    await syncWorkspace(ROOT);
+    expect(useFlows.getState().envs.local.secrets).toEqual({ token: "old" });
+    await saveEnv({ ...useFlows.getState().envs.local, secrets: {} });
+    const w = http.writes.find(([p]) => p === "env/local.secret.json");
+    expect(w && JSON.parse(w[1])).toEqual({ vars: {} });
+  });
+});
