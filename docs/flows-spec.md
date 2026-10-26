@@ -20,7 +20,7 @@ It must work for any project:
 | Flow definitions | `<workspace>/.auxin/flows/<slug>.flow.json` | yes: shareable |
 | Environments (non-secret vars) | `<workspace>/.auxin/env/<name>.json` | yes |
 | Secrets (tokens, keys) | `<workspace>/.auxin/env/<name>.secret.json` | **no**: Auxin adds `.auxin/env/*.secret.json` and `.auxin/runs/` to `<workspace>/.gitignore` the first time it writes a secret or run |
-| Run history (last 20 runs per flow) | `<workspace>/.auxin/runs/<slug>/<timestamp>.json` | no |
+| Run history (last 30 runs per flow) | `<workspace>/.auxin/runs/<slug>/<timestamp>.json` | no |
 | Canvas layout (node positions) | inside the flow file | yes |
 
 - Paths inside flow files are relative to the workspace root, so a teammate's checkout in a different folder works unchanged.
@@ -32,8 +32,8 @@ It must work for any project:
 
 ```json
 {
-  "$schema": "https://auxin.dev/schema/flow-1.json",
-  "version": 1,
+  "$schema": "https://auxin.dev/schema/flow-2.json",
+  "version": 2,
   "name": "Checkout end to end",
   "services": [
     { "ref": "api-gateway", "alias": "api-gateway", "x": 0, "y": 0 },
@@ -47,26 +47,30 @@ It must work for any project:
   "steps": [
     {
       "id": "submit",
+      "type": "http",
       "name": "Submit job",
-      "method": "POST",
-      "url": "{{api-gateway}}/jobs",
-      "headers": { "Content-Type": "application/json", "Authorization": "Bearer {{token}}" },
-      "body": { "file": "fixtures/create-order.json" },
+      "http": {
+        "method": "POST",
+        "url": "{{api-gateway}}/jobs",
+        "headers": { "Content-Type": "application/json", "Authorization": "Bearer {{token}}" },
+        "body": { "file": "fixtures/create-order.json" },
+        "timeoutMs": 30000
+      },
       "extract": { "jobId": "body.jobId" },
-      "checks": [ { "left": "status", "op": "==", "right": 202 } ],
-      "poll": null,
-      "timeoutMs": 30000
+      "checks": [ { "left": "status", "op": "==", "right": 202 } ]
     }
   ]
 }
 ```
 
+- Each step names its kind in `type`; `http` is the only kind so far, and its request sits under `http`. A step that polls has `wait: { until, everyMs, maxTries }`.
+- Version 1 files (method, url, headers, body and `poll` directly on the step) still load, and are written as version 2 the next time they're saved.
 - `alias` is the short name used in `{{variables}}` and on the canvas. It defaults to the detected service name and can be edited.
 - `body` is one of:
   - `{ "json": … }`
   - `{ "text": "…" }`
   - `{ "form": { … } }` (url-encoded)
-  - `{ "file": "relative/path" }`
+  - `{ "file": "relative/path" }`: relative to the workspace. A file outside it (absolute path, `..`, or a symlink out) is refused, because flow files can come from someone else's repo.
   - `null`
 - `headers` is an ordered object. Duplicate header names are not supported in v1.
 
@@ -206,7 +210,7 @@ Requests are sent from **Rust**, not from the webview's `fetch`. That means:
 - accurate timings;
 - no browser connection limits.
 
-**New command:** `http_send(req) → response`.
+**Command:** `step_exec({ kind: "http", …req }) → { kind: "http", …response }`, cancelled with `step_cancel(id)`. Every step kind goes through these two commands.
 
 - **Library:** `reqwest` (rustls, gzip/brotli, HTTP/1.1 + HTTP/2) on the Tauri async runtime.
 - **Request:**

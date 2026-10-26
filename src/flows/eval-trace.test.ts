@@ -99,7 +99,7 @@ describe("flow file: extract, checks, poll, map", () => {
     expect(doc.steps[0].poll).toEqual({ until: [chk("body.status", "==", '"done"')], everyMs: 500, maxTries: 10 });
     const out = JSON.parse(serializeFlow(doc).text);
     expect(out.steps[0].checks).toEqual([{ left: "status", op: "==", right: 200 }, { left: "body.ok", op: "exists" }]);
-    expect(out.steps[0].poll.until).toEqual([{ left: "body.status", op: "==", right: "done" }]);
+    expect(out.steps[0].wait.until).toEqual([{ left: "body.status", op: "==", right: "done" }]);
     expect(out.steps[0].extract).toEqual({ result: "body.result" });
     expect(out.dismissed).toEqual([{ from: "model", to: "gw" }]);
     expect(out.directions[0].evidence).toBe("gateway/.env:3  X=1");

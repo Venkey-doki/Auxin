@@ -3,6 +3,7 @@ mod deps;
 mod http;
 mod process;
 mod scan;
+mod steps;
 mod workspace_files;
 
 use process::{Manager, StartSpec};
@@ -13,13 +14,14 @@ use std::time::Duration;
 use tauri::{AppHandle, Manager as _, RunEvent, State};
 
 #[tauri::command]
-async fn http_send(app: AppHandle, state: State<'_, Arc<http::HttpState>>, req: http::HttpRequest) -> Result<http::HttpResponse, String> {
+async fn step_exec(app: AppHandle, state: State<'_, Arc<http::HttpState>>, req: steps::StepRequest) -> Result<steps::StepResult, String> {
     let temp = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("responses");
-    state.inner().clone().send(req, temp).await
+    steps::exec(state.inner().clone(), req, temp).await
 }
 
+/// Cancels an in-flight step of any kind by its id.
 #[tauri::command]
-fn http_cancel(state: State<'_, Arc<http::HttpState>>, id: String) -> bool {
+fn step_cancel(state: State<'_, Arc<http::HttpState>>, id: String) -> bool {
     state.cancel(&id)
 }
 
@@ -182,8 +184,8 @@ pub fn run() {
             load_config,
             save_config,
             open_in_editor,
-            http_send,
-            http_cancel,
+            step_exec,
+            step_cancel,
             http_drop_jar,
             auxin_list,
             auxin_write,

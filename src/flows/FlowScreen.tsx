@@ -34,7 +34,7 @@ import { selectServices, startService, toast, useStore } from "../state/store";
 import { EnvPanel } from "./EnvPanel";
 import { autoLayout, FlowCanvas, type CanvasNode, type EdgeRun, type NodeRun } from "./FlowCanvas";
 import { HistoryPanel } from "./HistoryPanel";
-import { blankStep, CHECK_OPS, type BodyKind, type Check, type CheckOp, type FlowDoc, type FlowStep } from "./model";
+import { blankStep, CHECK_OPS, outsideWorkspace, type BodyKind, type Check, type CheckOp, type FlowDoc, type FlowStep } from "./model";
 import { formatBytes, formatMs, Json, KVTable, METHOD_COLOR, MethodBadge, METHODS, Tabs, VarInput } from "./parts";
 import { addDirections, cancelRun, cancelStep, isRunning, runFlow, sendStep, type StepOutcome } from "./runner";
 import { activeEnvName, confirmDeleteFlow, rk, saveEnv, serviceIdFor, servicePorts, setActiveEnv, updateFlow, updateStep, useFlows, varSources } from "./store";
@@ -490,8 +490,8 @@ function StepRow({
           <MethodBadge method={step.method} />
           <span className="flex-none text-base font-medium">{step.name}</span>
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-3">{step.url}</span>
-          {step.body.kind === "file" && (step.body.file.startsWith("/") || step.body.file.split("/").includes("..")) && (
-            <span className="flex-none rounded bg-warm/15 px-1.5 text-xs text-warm" title={`Sends ${step.body.file}, which is outside the workspace`}>
+          {step.body.kind === "file" && outsideWorkspace(step.body.file) && (
+            <span className="flex-none rounded bg-warm/15 px-1.5 text-xs text-warm" title={`${step.body.file} is outside the workspace, so it won't be sent`}>
               file outside workspace
             </span>
           )}
@@ -773,10 +773,10 @@ function BodyEditor({ path, step, invalid }: { path: string; step: FlowStep; inv
   const [filePreview, setFilePreview] = useState<{ text: string; size: number } | string | null>(null);
 
   useEffect(() => {
-    if (step.body.kind !== "file" || !step.body.file || !root) return setFilePreview(null);
-    const abs = step.body.file.startsWith("/") ? step.body.file : `${root}/${step.body.file}`;
+    // Files outside the workspace are never sent, so they aren't read for a preview either.
+    if (step.body.kind !== "file" || !step.body.file || !root || outsideWorkspace(step.body.file)) return setFilePreview(null);
     api
-      .filePreview(abs)
+      .filePreview(`${root}/${step.body.file}`)
       .then(([text, size]) => setFilePreview({ text, size }))
       .catch((e) => setFilePreview(String(e)));
   }, [step.body.kind, step.body.file, root]);
@@ -834,8 +834,8 @@ function BodyEditor({ path, step, invalid }: { path: string; step: FlowStep; inv
           <span className="text-xs text-fg-3">
             Sent as-is (variables in the file aren't replaced). Paths are relative to the workspace, so teammates can use the same flow.
           </span>
-          {(step.body.file.startsWith("/") || step.body.file.split("/").includes("..")) && (
-            <span className="text-xs text-warm">This file is outside the workspace. Check it's meant to be sent, especially in a flow you got from someone else.</span>
+          {outsideWorkspace(step.body.file) && (
+            <span className="text-xs text-warm">This file is outside the workspace, so Auxin won't send it. Move it into the workspace folder and choose it again.</span>
           )}
           {typeof filePreview === "string" && <span className="text-xs text-bad-soft">{filePreview}</span>}
           {filePreview && typeof filePreview === "object" && (

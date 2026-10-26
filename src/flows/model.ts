@@ -1,8 +1,12 @@
 /**
  * Flow files (`.auxin/flows/*.flow.json`) and environments (`.auxin/env/*.json`),
  * per docs/flows-spec.md §2. In memory, headers and form fields are editable
- * rows; on disk they are ordered objects. Fields this version doesn't edit yet
- * (extract, checks, poll, directions…) are carried through untouched.
+ * rows; on disk they are ordered objects. Fields this version doesn't know are
+ * carried through untouched.
+ *
+ * Files are written as version 2, where each step names its kind
+ * (`type: "http"`) and keeps the request under `http`, and `poll` is `wait`.
+ * Version 1 files (flat steps) still load; they become version 2 on save.
  */
 
 export interface KV {
@@ -17,7 +21,7 @@ export interface StepBody {
   /** JSON or text source as the user typed it. */
   text: string;
   form: KV[];
-  /** Relative to the workspace root. */
+  /** Relative to the workspace root; files outside it are never sent. */
   file: string;
 }
 
@@ -98,7 +102,7 @@ export interface EnvDoc {
 }
 
 const FLOW_KEYS = ["$schema", "version", "name", "steps", "trace", "services", "directions", "dismissed"];
-const STEP_KEYS = ["id", "name", "method", "url", "headers", "body", "timeoutMs", "extract", "checks", "poll"];
+const STEP_KEYS = ["id", "type", "name", "http", "method", "url", "headers", "body", "timeoutMs", "extract", "checks", "wait", "poll"];
 
 export function slugify(name: string): string {
   return (
@@ -115,6 +119,11 @@ export function slugify(name: string): string {
 
 export function newStepId(): string {
   return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+}
+
+/** Absolute or `..` paths; the backend refuses to send these (and symlinks out). */
+export function outsideWorkspace(file: string): boolean {
+  return file.startsWith("/") || file.split("/").includes("..");
 }
 
 export function emptyBody(): StepBody {
@@ -225,7 +234,10 @@ export function parseFlow(path: string, text: string): FlowDoc {
       .filter((d: Record<string, unknown>) => d && typeof d.from === "string" && typeof d.to === "string")
       .map((d: Record<string, unknown>) => ({ from: String(d.from), to: String(d.to), source: String(d.source ?? "manual") as DirectionSource, evidence: String(d.evidence ?? ""), confirmed: d.confirmed !== false })),
     dismissed: (Array.isArray(raw.dismissed) ? raw.dismissed : []).filter((d: Record<string, unknown>) => d && typeof d.from === "string").map((d: Record<string, unknown>) => ({ from: String(d.from), to: String(d.to) })),
-    steps: steps.map((s: Record<string, unknown>) => {
+    steps: steps.map((step: Record<string, unknown>) => {
+      // v2 keeps the request under `http`; v1 has it on the step itself.
+      const req = step.http && typeof step.http === "object" ? (step.http as Record<string, unknown>) : step;
+      const s: Record<string, unknown> = { ...step, ...req, poll: step.wait ?? step.poll };
       const jsonText = s.body && typeof s.body === "object" && "jsonText" in (s.body as object) ? String((s.body as Record<string, unknown>).jsonText) : null;
       return {
         id: String(s.id ?? newStepId()),
@@ -245,7 +257,7 @@ export function parseFlow(path: string, text: string): FlowDoc {
                 maxTries: Number((s.poll as Record<string, unknown>).maxTries) || 30,
               }
             : null,
-        rest: pick(s, STEP_KEYS),
+        rest: pick(step, STEP_KEYS),
       };
     }),
   };
@@ -264,21 +276,18 @@ export function serializeFlow(doc: FlowDoc, previous?: FlowDoc): { text: string;
     }
     return {
       id: s.id,
+      type: "http",
       name: s.name,
-      method: s.method,
-      url: s.url,
-      headers: toObject(s.headers),
-      body: body.value,
+      http: { method: s.method, url: s.url, headers: toObject(s.headers), body: body.value, timeoutMs: s.timeoutMs },
       extract: toObject(s.extract),
       checks: s.checks.filter((c) => c.left.trim()).map(checkOut),
-      poll: s.poll ? { until: s.poll.until.filter((c) => c.left.trim()).map(checkOut), everyMs: s.poll.everyMs, maxTries: s.poll.maxTries } : null,
-      timeoutMs: s.timeoutMs,
+      ...(s.poll ? { wait: { until: s.poll.until.filter((c) => c.left.trim()).map(checkOut), everyMs: s.poll.everyMs, maxTries: s.poll.maxTries } } : {}),
       ...s.rest,
     };
   });
   const out = {
-    $schema: "https://auxin.dev/schema/flow-1.json",
-    version: 1,
+    $schema: "https://auxin.dev/schema/flow-2.json",
+    version: 2,
     name: doc.name,
     ...doc.rest,
     services: doc.services,

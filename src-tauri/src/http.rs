@@ -5,7 +5,7 @@ use base64::Engine as _;
 use reqwest::{cookie::Jar, redirect::Policy, Client, Method};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -19,7 +19,8 @@ pub enum HttpBody {
     None,
     Text(String),
     Base64(String),
-    /// Absolute path; read here so large payload files never cross the IPC bridge.
+    /// Path relative to `HttpRequest::root`; read here so large payload files
+    /// never cross the IPC bridge.
     File(String),
 }
 
@@ -40,6 +41,9 @@ pub struct HttpRequest {
     pub insecure_tls: bool,
     /// Requests sharing a jar id share cookies (one jar per flow run).
     pub cookie_jar: Option<String>,
+    /// Workspace root. A file body must resolve inside it.
+    #[serde(default)]
+    pub root: Option<String>,
 }
 
 fn default_timeout() -> u64 {
@@ -125,6 +129,23 @@ fn friendly(e: reqwest::Error, url: &str) -> String {
     }
 }
 
+/// Flow files can come from a cloned repo, so a body file is only read when it
+/// is inside the workspace: never an absolute path, `..`, or a symlink out.
+fn body_file(root: Option<&str>, rel: &str) -> Result<PathBuf, String> {
+    let outside = || format!("Body file {rel} is outside the workspace. Move it into the workspace folder to send it.");
+    let p = Path::new(rel);
+    if rel.is_empty() || p.is_absolute() || p.components().any(|c| !matches!(c, Component::Normal(_) | Component::CurDir)) {
+        return Err(outside());
+    }
+    let root = std::fs::canonicalize(root.ok_or("Body files need an open workspace")?).map_err(|e| format!("Couldn't open the workspace folder: {e}"))?;
+    let full = std::fs::canonicalize(root.join(p)).map_err(|e| format!("Couldn't read body file {rel}: {e}"))?;
+    if full.starts_with(&root) {
+        Ok(full)
+    } else {
+        Err(outside())
+    }
+}
+
 async fn execute(state: &HttpState, req: HttpRequest, temp_dir: PathBuf) -> Result<HttpResponse, String> {
     let method = Method::from_str(&req.method.to_uppercase()).map_err(|_| format!("Unknown method {}", req.method))?;
     let mut builder = Client::builder()
@@ -146,7 +167,7 @@ async fn execute(state: &HttpState, req: HttpRequest, temp_dir: PathBuf) -> Resu
         HttpBody::None => rb,
         HttpBody::Text(t) => rb.body(t),
         HttpBody::Base64(b) => rb.body(base64::engine::general_purpose::STANDARD.decode(b).map_err(|e| format!("Body isn't valid base64: {e}"))?),
-        HttpBody::File(p) => rb.body(std::fs::read(&p).map_err(|e| format!("Couldn't read body file {p}: {e}"))?),
+        HttpBody::File(p) => rb.body(std::fs::read(body_file(req.root.as_deref(), &p)?).map_err(|e| format!("Couldn't read body file {p}: {e}"))?),
     };
 
     let started = Instant::now();
@@ -240,6 +261,7 @@ mod tests {
             follow_redirects: true,
             insecure_tls: false,
             cookie_jar: None,
+            root: None,
         }
     }
 
@@ -318,14 +340,37 @@ mod tests {
     }
 
     #[test]
-    fn file_body_is_read_from_disk() {
+    fn file_body_is_read_from_the_project() {
         let (url, server) = serve_once("HTTP/1.1 204 No Content\r\n\r\n", 0);
         let dir = tempfile::tempdir().unwrap();
-        let f = dir.path().join("payload.json");
-        std::fs::write(&f, r#"{"region":"eu-west"}"#).unwrap();
+        std::fs::create_dir(dir.path().join("payloads")).unwrap();
+        std::fs::write(dir.path().join("payloads/a.json"), r#"{"region":"eu-west"}"#).unwrap();
         let state = Arc::new(HttpState::default());
-        let res = rt().block_on(state.send(req(url, "POST", HttpBody::File(f.to_string_lossy().into())), std::env::temp_dir())).unwrap();
+        let mut r = req(url, "POST", HttpBody::File("payloads/a.json".into()));
+        r.root = Some(dir.path().to_string_lossy().into());
+        let res = rt().block_on(state.send(r, std::env::temp_dir())).unwrap();
         assert_eq!(res.status, 204);
         assert!(server.join().unwrap().ends_with(r#"{"region":"eu-west"}"#));
+    }
+
+    #[test]
+    fn file_body_outside_the_project_is_refused() {
+        let outer = tempfile::tempdir().unwrap();
+        let project = outer.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let secret = outer.path().join("id_rsa");
+        std::fs::write(&secret, "KEY").unwrap();
+        let root = Some(project.to_string_lossy().into_owned());
+        let abs = secret.to_string_lossy().into_owned();
+        for rel in [abs.as_str(), "../id_rsa", "./../id_rsa", ""] {
+            let err = body_file(root.as_deref(), rel).unwrap_err();
+            assert!(err.contains("outside the workspace"), "{rel}: {err}");
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&secret, project.join("link.json")).unwrap();
+            assert!(body_file(root.as_deref(), "link.json").unwrap_err().contains("outside the workspace"));
+        }
+        assert!(body_file(None, "a.json").is_err());
     }
 }

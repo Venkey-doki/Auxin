@@ -238,9 +238,9 @@ export function installMockBackend() {
           return null;
         case "file_preview":
           return ['{ "region": "eu-west", "hours": 24 }', 34];
-        case "http_send":
+        case "step_exec":
           return fakeHttp(a.req);
-        case "http_cancel":
+        case "step_cancel":
           return true;
         case "http_drop_jar":
           return null;

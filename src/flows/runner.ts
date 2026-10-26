@@ -3,14 +3,14 @@
  * from earlier responses, polling, checks, extraction, trace headers, the trace
  * itself, run history, and the connection sampler during runs.
  */
-import { api, type HttpBody, type HttpResponse } from "../lib/api";
+import { api, type HttpResponse } from "../lib/api";
 import { getLogs } from "../state/logs";
 import { selectServices, toast, useStore } from "../state/store";
-import { evalCheck, extractValue, type CheckResult, type ResponseView } from "./eval";
+import { mask, prepareRequest, runHttpStep, runSequence } from "./engine";
+import type { CheckResult } from "./eval";
 import { slugify, type Direction, type FlowDoc, type FlowStep, type KV } from "./model";
 import { activeEnvName, rk, serviceIdFor, servicePorts, updateFlow, useFlows, varSources, write } from "./store";
-import { computeTrace, correlationValues, isCorrelationValue, newTraceIds, type TraceResult, type TraceService } from "./trace";
-import { resolve, type VarSources } from "./vars";
+import { computeTrace, correlationValues, isCorrelationValue, type TraceResult, type TraceService } from "./trace";
 
 export type StepState = "queued" | "sending" | "polling" | "passed" | "failed" | "error" | "skipped" | "cancelled";
 
@@ -52,7 +52,7 @@ export interface FlowRunState {
 const get = useFlows.getState;
 const set = useFlows.setState;
 
-const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 const newId = () => `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
 /** Outcomes are keyed by `rk(path, stepId)`; `key` is that composite key. */
@@ -65,15 +65,6 @@ function patchOutcome(key: string, reqId: string, patch: Partial<StepOutcome>) {
   if (cur?.reqId === reqId) setOutcome(key, { ...cur, ...patch });
 }
 
-function mask(text: string, used: Iterable<string>, src: VarSources): string {
-  let out = text;
-  for (const name of used) {
-    const v = src.secrets[name];
-    if (v) out = out.split(v).join("••••••");
-  }
-  return out;
-}
-
 /* ---------- one request ---------- */
 
 interface ExecContext {
@@ -84,145 +75,59 @@ interface ExecContext {
   onInflight?: (id: string | null) => void;
 }
 
-function toView(r: HttpResponse): ResponseView {
-  return { status: r.status, timeMs: r.totalMs, headers: r.headers, bodyText: r.bodyText };
-}
-
-/** Sends a step (polling if configured), evaluates checks and extracts values. */
+/** Sends a step through the engine and mirrors its progress into the UI state. */
 async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<StepOutcome> {
-  const root = get().root;
   const key = rk(doc.path, step.id);
   const src = varSources(doc, ctx.extra);
   const reqId = newId();
-  const url = resolve(step.url, src);
-  const headers = step.headers.filter((h) => h.key.trim()).map((h) => ({ key: h.key.trim(), ...resolve(h.value, src) }));
-  const missing = new Set([...url.missing, ...headers.flatMap((h) => h.missing)]);
-  const usedSecrets = new Set([...url.usedSecrets, ...headers.flatMap((h) => h.usedSecrets)]);
-
-  let body: HttpBody = { kind: "none" };
-  let bodyText = "";
-  let defaultType: string | undefined;
-  if (step.body.kind === "json" || step.body.kind === "text") {
-    const r = resolve(step.body.text, src);
-    r.missing.forEach((m) => missing.add(m));
-    r.usedSecrets.forEach((m) => usedSecrets.add(m));
-    bodyText = r.text;
-    if (bodyText) body = { kind: "text", value: bodyText };
-    if (step.body.kind === "json") defaultType = "application/json";
-  } else if (step.body.kind === "form") {
-    const parts = step.body.form
-      .filter((f) => f.key.trim())
-      .map((f) => {
-        const r = resolve(f.value, src);
-        r.missing.forEach((m) => missing.add(m));
-        r.usedSecrets.forEach((m) => usedSecrets.add(m));
-        return `${encodeURIComponent(f.key.trim())}=${encodeURIComponent(r.text)}`;
-      });
-    bodyText = parts.join("&");
-    body = { kind: "text", value: bodyText };
-    defaultType = "application/x-www-form-urlencoded";
-  } else if (step.body.kind === "file" && step.body.file) {
-    body = { kind: "file", value: step.body.file.startsWith("/") ? step.body.file : `${root}/${step.body.file}` };
-  }
-
-  const finalHeaders: [string, string][] = headers.map((h) => [h.key, h.text]);
-  const has = (name: string) => finalHeaders.some(([k]) => k.toLowerCase() === name);
-  if (defaultType && !has("content-type")) finalHeaders.push(["Content-Type", defaultType]);
-
-  // Tag the request so its log lines can be found in every service (§5.1).
-  let ids: ReturnType<typeof newTraceIds> | undefined;
-  if (doc.injectHeaders) {
-    ids = newTraceIds();
-    const existing = finalHeaders.find(([k]) => k.toLowerCase() === "x-request-id");
-    if (existing) ids.requestId = existing[1];
-    else finalHeaders.push(["X-Request-ID", ids.requestId]);
-    if (!has("traceparent")) finalHeaders.push(["traceparent", ids.traceparent]);
-  }
-
+  const req = prepareRequest(step, src, doc.injectHeaders);
   const shown = {
-    method: step.method,
-    url: mask(url.text, usedSecrets, src),
-    headers: finalHeaders.map(([k, v]): [string, string] => [k, mask(v, usedSecrets, src)]),
+    method: req.method,
+    url: mask(req.url, req.usedSecrets, src),
+    headers: req.headers.map(([k, v]): [string, string] => [k, mask(v, req.usedSecrets, src)]),
   };
-  const base: StepOutcome = { state: "sending", reqId, sentAt: Date.now(), ...shown, checks: [], extracted: [], requestId: ids?.requestId, traceId: ids?.traceId };
+  const base: StepOutcome = { state: "sending", reqId, sentAt: Date.now(), ...shown, checks: [], extracted: [], requestId: req.requestId, traceId: req.traceId };
 
-  if (missing.size) {
-    const names = [...missing].map((m) => `{{${m}}}`).join(", ");
+  if (req.missing.length) {
+    const missing = req.missing;
+    const names = missing.map((m) => `{{${m}}}`).join(", ");
     const services = selectServices(useStore.getState());
-    const svcName = [...missing].find((m) => services.some((x) => x.name === m) || doc.services.some((f) => f.alias === m));
+    const svcName = missing.find((m) => services.some((x) => x.name === m) || doc.services.some((f) => f.alias === m));
     const svc = svcName && (services.find((x) => x.name === svcName) ?? services.find((x) => x.id === serviceIdFor(doc.services.find((f) => f.alias === svcName)!.ref)));
-    const earlier = [...missing].filter((m) => doc.steps.some((st) => st.extract.some((e) => e.key === m)));
+    const earlier = missing.filter((m) => doc.steps.some((st) => st.extract.some((e) => e.key === m)));
     const error = svc
       ? `Not sent: Auxin doesn't know ${svc.name}'s port yet. Start it once and its port is remembered, or set its URL under Environment.`
       : earlier.length
         ? `Not sent: ${earlier.map((m) => `{{${m}}}`).join(", ")} comes from an earlier request. Send that one first, or press Run flow.`
-        : `Not sent: ${names} ${missing.size > 1 ? "have" : "has"} no value in “${activeEnvName()}”. Add ${missing.size > 1 ? "them" : "it"} under Environment.`;
+        : `Not sent: ${names} ${missing.length > 1 ? "have" : "has"} no value in “${activeEnvName()}”. Add ${missing.length > 1 ? "them" : "it"} under Environment.`;
     const o: StepOutcome = { ...base, state: "error", finishedAt: Date.now(), error, missingService: svc ? svc.name : undefined };
     setOutcome(key, o);
     return o;
   }
 
   setOutcome(key, base);
-  const env = get().envs[activeEnvName()];
-  const maxTries = step.poll ? Math.max(1, step.poll.maxTries) : 1;
-  let res: HttpResponse | undefined;
-  let tries = 0;
-  let pollUnmet: CheckResult[] = [];
+  const result = await runHttpStep(
+    step,
+    req,
+    { reqId, jar: ctx.jar, insecureTls: get().envs[activeEnvName()]?.insecureTls ?? false, root: get().root },
+    {
+      send: api.httpSend,
+      cancelled: ctx.cancelled,
+      sleep,
+      onPoll: ({ tries, res }) => patchOutcome(key, reqId, res ? { res, tries } : { state: "polling", tries }),
+      onInflight: ctx.onInflight,
+    },
+  );
 
-  for (; tries < maxTries; ) {
-    if (ctx.cancelled()) return finish({ state: "cancelled", error: "Cancelled." });
-    tries++;
-    if (step.poll) patchOutcome(key, reqId, { state: "polling", tries });
-    const httpId = `${reqId}-${tries}`;
-    ctx.onInflight?.(httpId);
-    try {
-      res = await api.httpSend({ id: httpId, method: step.method, url: url.text, headers: finalHeaders, body, timeoutMs: step.timeoutMs, followRedirects: true, insecureTls: env?.insecureTls ?? false, cookieJar: ctx.jar });
-    } catch (e) {
-      ctx.onInflight?.(null);
-      const msg = String(e);
-      if (msg === "Cancelled" || ctx.cancelled()) return finish({ state: "cancelled", error: "Cancelled." });
-      const port = /:(\d{2,5})\b/.exec(/Couldn't connect to ([^.]+)/.exec(msg)?.[1] ?? "")?.[1];
-      return finish({ state: "error", error: msg, refusedPort: port ? Number(port) : undefined, tries });
-    }
-    ctx.onInflight?.(null);
-    if (!step.poll) break;
-    const view = toView(res);
-    pollUnmet = step.poll.until.filter((c) => c.left.trim()).map((c) => evalCheck(c, view)).filter((r) => !r.ok);
-    if (!pollUnmet.length) break;
-    if (tries < maxTries) {
-      patchOutcome(key, reqId, { res, tries });
-      for (let waited = 0; waited < step.poll.everyMs; waited += 100) {
-        if (ctx.cancelled()) return finish({ state: "cancelled", error: "Cancelled.", res, tries });
-        await sleep(Math.min(100, step.poll.everyMs - waited));
-      }
-    }
-  }
-
-  const view = toView(res!);
-  const checks = step.checks.filter((c) => c.left.trim()).map((c) => evalCheck(c, view));
-  // With no checks of its own, a request fails on an HTTP error status.
-  if (!step.checks.some((c) => c.left.trim())) checks.push({ label: "status < 400", ok: res!.status < 400, got: String(res!.status) });
-  if (step.poll && pollUnmet.length) checks.unshift({ label: `poll until ${pollUnmet.map((p) => p.label).join(" and ")}`, ok: false, got: `not met after ${tries} tries (${pollUnmet[0].got})` });
-  const extracted: KV[] = [];
-  const missingExtract: string[] = [];
-  for (const e of step.extract.filter((x) => x.key.trim() && x.value.trim())) {
-    const v = extractValue(e.value, view);
-    if (v === undefined) missingExtract.push(e.key);
-    else extracted.push({ key: e.key.trim(), value: v });
-  }
-  if (missingExtract.length) checks.push({ label: `extract ${missingExtract.join(", ")}`, ok: false, got: "path not found in response" });
-  return finish({ state: checks.every((c) => c.ok) ? "passed" : "failed", res, tries, checks, extracted });
-
-  function finish(patch: Partial<StepOutcome>): StepOutcome {
-    const o: StepOutcome = { ...(get().responses[key]?.reqId === reqId ? get().responses[key] : base), ...patch, finishedAt: Date.now() };
-    // Error text can echo the URL (and any secret resolved into it).
-    if (o.error) o.error = mask(o.error, usedSecrets, src);
-    if (o.state !== "cancelled" && (o.res || o.state === "error")) o.tracing = !!o.res;
-    setOutcome(key, o);
-    // Only secrets this request used, and long enough to be distinctive.
-    if (o.res) scheduleTrace(doc, step, o, bodyText, [...usedSecrets].map((n) => src.secrets[n]).filter((v) => v && v.length >= 4));
-    return o;
-  }
+  const current = get().responses[key]?.reqId === reqId ? get().responses[key] : base;
+  const o: StepOutcome = { ...current, ...result, finishedAt: Date.now() };
+  // Error text can echo the URL (and any secret resolved into it).
+  if (o.error) o.error = mask(o.error, req.usedSecrets, src);
+  if (o.state !== "cancelled" && (o.res || o.state === "error")) o.tracing = !!o.res;
+  setOutcome(key, o);
+  // Only secrets this request used, and long enough to be distinctive.
+  if (o.res) scheduleTrace(doc, step, o, req.bodyText, req.usedSecrets.map((n) => src.secrets[n]).filter((v) => v && v.length >= 4));
+  return o;
 }
 
 /* ---------- tracing ---------- */
@@ -364,26 +269,25 @@ export async function runFlow(path: string) {
   const stopSampler = startConnectionSampler(path);
   const jar = `run:${runId}`;
   const extra: Record<string, string> = {};
-  const outcomes: StepOutcome[] = [];
-  let failed = false;
-  for (const step of doc.steps) {
-    const latest = get().flows[path]?.steps.find((s) => s.id === step.id) ?? step;
-    if (cancelled || failed) {
-      const o: StepOutcome = { ...get().responses[rk(path, step.id)], state: cancelled ? "cancelled" : "skipped" };
+  const { outcomes, status } = await runSequence(
+    doc.steps,
+    async (step) => {
+      const latest = get().flows[path]?.steps.find((s) => s.id === step.id) ?? step;
+      const o = await execute(get().flows[path] ?? doc, latest, { extra, jar, cancelled: () => cancelled, onInflight: (id) => (current = id) });
+      for (const e of o.extracted) extra[e.key] = e.value;
+      return o;
+    },
+    (step, why) => {
+      const o: StepOutcome = { ...get().responses[rk(path, step.id)], state: why };
       setOutcome(rk(path, step.id), o);
-      outcomes.push(o);
-      continue;
-    }
-    const o = await execute(get().flows[path] ?? doc, latest, { extra, jar, cancelled: () => cancelled, onInflight: (id) => (current = id) });
-    outcomes.push(o);
-    for (const e of o.extracted) extra[e.key] = e.value;
-    if (o.state !== "passed") failed = true;
-  }
+      return o;
+    },
+    () => cancelled,
+  );
   stopSampler();
   runCancel.delete(path);
   void api.httpDropJar(jar).catch(() => undefined);
 
-  const status: FlowRunState["status"] = cancelled ? "cancelled" : failed ? "failed" : "passed";
   set((s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], status, finishedAt: Date.now() } }, extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...extra } } }));
 
   // History includes each step's trace summary, so wait for the traces; then
@@ -401,7 +305,7 @@ export function cancelRun(path: string) {
   runCancel.get(path)?.();
 }
 
-/* ---------- run history (§2: .auxin/runs/<flow>/, last 20) ---------- */
+/* ---------- run history (§2: .auxin/runs/<flow>/, last 30) ---------- */
 
 export interface RunRecord {
   version: 1;
@@ -427,7 +331,7 @@ export interface RunRecord {
   }[];
 }
 
-const KEEP_RUNS = 20;
+const KEEP_RUNS = 30;
 const runsDir = (path: string) => `runs/${slugify(path.replace(/^flows\//, "").replace(/\.flow\.json$/, ""))}`;
 
 /** `steps` is the order the run used, so a mid-run reorder can't misalign outcomes. */

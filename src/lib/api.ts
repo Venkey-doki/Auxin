@@ -37,6 +37,8 @@ export interface HttpRequest {
   followRedirects?: boolean;
   insecureTls?: boolean;
   cookieJar?: string | null;
+  /** Project root; a file body must be a path inside it. */
+  root?: string | null;
 }
 
 export interface HttpResponse {
@@ -69,8 +71,9 @@ export const api = {
   loadConfig: () => invoke<string | null>("load_config"),
   saveConfig: (json: string) => invoke<void>("save_config", { json }),
   openInEditor: (path: string) => invoke<void>("open_in_editor", { path }),
-  httpSend: (req: HttpRequest) => invoke<HttpResponse>("http_send", { req }),
-  httpCancel: (id: string) => invoke<boolean>("http_cancel", { id }),
+  /** HTTP is the first step kind behind `step_exec`. */
+  httpSend: (req: HttpRequest) => invoke<HttpResponse>("step_exec", { req: { kind: "http", ...req } }),
+  httpCancel: (id: string) => invoke<boolean>("step_cancel", { id }),
   httpDropJar: (id: string) => invoke<void>("http_drop_jar", { id }),
   auxinList: (root: string) => invoke<AuxinFile[]>("auxin_list", { root }),
   auxinWrite: (root: string, path: string, text: string) => invoke<void>("auxin_write", { root, path, text }),

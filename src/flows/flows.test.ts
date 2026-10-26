@@ -93,7 +93,7 @@ describe("flow files", () => {
     const again = JSON.parse(serializeFlow(doc).text);
     expect(again.services).toEqual([{ ref: "gw", alias: "gw" }]);
     expect(again.steps[0].extract).toEqual({ jobId: "body.jobId" });
-    expect(again.steps[0].body).toEqual({ json: { n: 1 } });
+    expect(again.steps[0].http.body).toEqual({ json: { n: 1 } });
     expect(again.trace).toEqual({ injectHeaders: false, graceMs: 900 });
   });
 
@@ -103,14 +103,14 @@ describe("flow files", () => {
     const edited = { ...prev, steps: [{ ...prev.steps[0], body: { ...prev.steps[0].body, text: '{"ok":' } }] };
     const out = serializeFlow(edited, prev);
     expect(out.invalid).toEqual(["s"]);
-    expect(JSON.parse(out.text).steps[0].body).toEqual({ json: { ok: true } });
+    expect(JSON.parse(out.text).steps[0].http.body).toEqual({ json: { ok: true } });
   });
 
   it("keeps JSON bodies with unquoted {{vars}} as source text", () => {
     const f = newFlow("flows/v.flow.json", "V");
     f.steps = [{ ...blankStep(1), id: "s", body: { kind: "json", text: '{"count": {{n}}}', form: [], file: "" } }];
     const saved = serializeFlow(f).text;
-    expect(JSON.parse(saved).steps[0].body).toEqual({ jsonText: '{"count": {{n}}}' });
+    expect(JSON.parse(saved).steps[0].http.body).toEqual({ jsonText: '{"count": {{n}}}' });
     expect(parseFlow("flows/v.flow.json", saved).steps[0].body).toMatchObject({ kind: "json", text: '{"count": {{n}}}' });
   });
 
@@ -127,7 +127,36 @@ describe("flow files", () => {
     const mixed = { ...f, steps: [{ ...blankStep(1), id: "m", body: { kind: "json" as const, text: '{"ref":"1111111111111111","id":12345678901234567890}', form: [], file: "" } }] };
     expect(parseFlow("flows/j.flow.json", serializeFlow(mixed).text).steps[0].body.text).toContain("12345678901234567890");
     // Long digits inside a string are safe, so it's stored as parsed JSON.
-    expect(JSON.parse(serializeFlow(f).text).steps[2].body).toEqual({ json: { small: 42, name: "1234567890123456789" } });
+    expect(JSON.parse(serializeFlow(f).text).steps[2].http.body).toEqual({ json: { small: 42, name: "1234567890123456789" } });
+  });
+
+  it("loads a version 1 file and saves it as version 2", () => {
+    const v1 = JSON.stringify({
+      version: 1,
+      name: "Old",
+      steps: [{ id: "a", name: "Wait", method: "get", url: "{{gw}}/jobs", headers: { Accept: "*/*" }, body: { text: "hi" }, timeoutMs: 5000, poll: { until: { left: "body.done", op: "==", right: true }, everyMs: 200, maxTries: 3 }, note: "kept" }],
+    });
+    const out = JSON.parse(serializeFlow(parseFlow("flows/old.flow.json", v1)).text);
+    expect(out.version).toBe(2);
+    expect(out.steps[0]).toEqual({
+      id: "a",
+      type: "http",
+      name: "Wait",
+      http: { method: "GET", url: "{{gw}}/jobs", headers: { Accept: "*/*" }, body: { text: "hi" }, timeoutMs: 5000 },
+      extract: {},
+      checks: [],
+      wait: { until: [{ left: "body.done", op: "==", right: true }], everyMs: 200, maxTries: 3 },
+      note: "kept",
+    });
+  });
+
+  it("version 2 files round-trip unchanged, without a wait when there's none", () => {
+    const f = newFlow("flows/v2.flow.json", "V2");
+    f.steps = [{ ...blankStep(1), id: "s", method: "POST", url: "{{gw}}/x", body: { kind: "json", text: '{"a":1}', form: [], file: "" } }];
+    const once = serializeFlow(f).text;
+    expect(JSON.parse(once).steps[0]).not.toHaveProperty("wait");
+    expect(JSON.parse(once).steps[0]).not.toHaveProperty("method");
+    expect(serializeFlow(parseFlow("flows/v2.flow.json", once)).text).toBe(once);
   });
 
   it("environments keep secrets out of the shared file", () => {
