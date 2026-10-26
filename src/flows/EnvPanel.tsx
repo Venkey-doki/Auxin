@@ -3,7 +3,7 @@ import { Plus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, cx, IconButton, Switch } from "../components/ui";
 import { selectServices, useStore } from "../state/store";
-import { parseEnv, type EnvDoc, type KV } from "./model";
+import { parseEnv, type EnvDoc, type KV, type NetworkRules } from "./model";
 import { KVTable } from "./parts";
 import { activeEnvName, createEnv, saveEnv, servicePorts, setActiveEnv, useFlows } from "./store";
 
@@ -26,10 +26,13 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
   const [secrets, setSecrets] = useState<KV[]>(() => rows(env.secrets));
   const [urls, setUrls] = useState<Record<string, string>>(env.baseUrls);
   const [insecure, setInsecure] = useState(env.insecureTls);
+  const [allowPrivate, setAllowPrivate] = useState(env.network.allowPrivate);
+  /** Allowed hosts as typed, one per line; saved without blank lines. */
+  const [hosts, setHosts] = useState(env.network.allowHosts.join("\n"));
   const [adding, setAdding] = useState<string | null>(null);
 
-  type Section = "vars" | "secrets" | "urls" | "insecure";
-  type Edits = Partial<{ vars: KV[]; secrets: KV[]; urls: Record<string, string>; insecure: boolean }>;
+  type Section = "vars" | "secrets" | "urls" | "insecure" | "network";
+  type Edits = Partial<{ vars: KV[]; secrets: KV[]; urls: Record<string, string>; insecure: boolean; network: NetworkRules }>;
   /** Unsaved edits, by section, for the env named in `pendingFor`. */
   const pendingEdits = useRef<Edits>({});
   const pendingFor = useRef(name);
@@ -52,6 +55,7 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
       ...(edits.secrets ? { secrets: obj(edits.secrets) } : {}),
       ...(edits.urls ? { baseUrls: Object.fromEntries(Object.entries(edits.urls).filter(([, v]) => v.trim())) } : {}),
       ...(edits.insecure !== undefined ? { insecureTls: edits.insecure } : {}),
+      ...(edits.network ? { network: edits.network } : {}),
     };
     lastSaved.current = JSON.stringify(doc);
     void saveEnv(doc);
@@ -66,6 +70,10 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
       if (!only || only.has("secrets")) setSecrets(rows(env.secrets));
       if (!only || only.has("urls")) setUrls(env.baseUrls);
       if (!only || only.has("insecure")) setInsecure(env.insecureTls);
+      if (!only || only.has("network")) {
+        setAllowPrivate(env.network.allowPrivate);
+        setHosts(env.network.allowHosts.join("\n"));
+      }
     };
     if (shownFor.current !== name) {
       // Switching env: finish the old env's save first, then show the new one in full.
@@ -77,7 +85,7 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
     // Our own save coming back from the store: keep the rows as typed (blank rows included).
     if (lastSaved.current === JSON.stringify(env)) return;
     // An outside change (curl import, git pull): refresh sections not being edited.
-    const untouched = new Set<Section>((["vars", "secrets", "urls", "insecure"] as Section[]).filter((k) => !(k in pendingEdits.current)));
+    const untouched = new Set<Section>((["vars", "secrets", "urls", "insecure", "network"] as Section[]).filter((k) => !(k in pendingEdits.current)));
     load(untouched);
   }, [name, env]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -191,6 +199,36 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
           </div>
         </Section>
 
+        <Section title="Network">
+          <div className="flex items-center gap-3">
+            <span className="flex-1 text-sm text-fg-2">Allow localhost and private addresses</span>
+            <Switch
+              checked={allowPrivate}
+              onChange={() => {
+                setAllowPrivate(!allowPrivate);
+                persist({ network: { allowPrivate: !allowPrivate, allowHosts: hostList(hosts) } });
+              }}
+              label="Allow localhost and private addresses"
+            />
+          </div>
+          <label className="grid gap-1.5">
+            <span className="text-sm text-fg-2">Allowed public hosts</span>
+            <textarea
+              className="h-20 w-full resize-none rounded-md border border-line-strong bg-rail px-2.5 py-1.5 font-mono text-sm text-fg outline-none placeholder:text-fg-3 focus:border-paper/70"
+              value={hosts}
+              placeholder={"api.example.com\n*.staging.example.com"}
+              onChange={(e) => {
+                setHosts(e.target.value);
+                persist({ network: { allowPrivate, allowHosts: hostList(e.target.value) } });
+              }}
+              spellCheck={false}
+            />
+          </label>
+          <span className="text-xs text-fg-3">
+            One per line; leave empty to allow any public host. Cloud metadata addresses like 169.254.169.254 are always blocked, and every redirect is checked too.
+          </span>
+        </Section>
+
         <Section title="TLS">
           <div className="flex items-center gap-3">
             <span className="flex-1 text-sm text-fg-2">Accept self-signed certificates</span>
@@ -208,6 +246,12 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
     </aside>
   );
 }
+
+const hostList = (text: string) =>
+  text
+    .split(/[\s,]+/)
+    .map((h) => h.trim())
+    .filter(Boolean);
 
 function Section({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
   return (

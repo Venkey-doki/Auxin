@@ -1,10 +1,15 @@
-/** Past runs of a flow (`.auxin/runs/<flow>/`), each compared with the run before it. */
-import { ChevronRight, RefreshCw, X } from "lucide-react";
+/**
+ * Past runs of a flow (`.auxin/runs/<flow>/`), each compared with the run
+ * before it. A run can be replayed: the flow as it was then, with today's
+ * environment. Each request keeps its (redacted) request and response.
+ */
+import { ChevronRight, RefreshCw, RotateCcw, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { StatusMark, STATUS_TEXT, type Shown } from "../components/status";
-import { cx, IconButton } from "../components/ui";
+import { Button, cx, IconButton } from "../components/ui";
 import { formatMs, MethodBadge } from "./parts";
-import { loadHistory, type RunRecord } from "./runner";
+import { HeaderList } from "./StepDetail";
+import { isRunning, loadHistory, replayRun, type RunRecord } from "./runner";
 import { useFlows } from "./store";
 
 const TONE: Record<RunRecord["status"], Shown> = { passed: "running", failed: "crashed", cancelled: "stopped", running: "starting" };
@@ -14,6 +19,7 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
   const run = useFlows((s) => s.runs[path]);
   const [runs, setRuns] = useState<RunRecord[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const running = run?.status === "running" || isRunning(path);
 
   const load = () => void loadHistory(path).then(setRuns);
   // Reload once a finished run's history file is written.
@@ -23,7 +29,7 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
     <aside className="flex w-[380px] flex-none flex-col border-l border-line bg-surface" aria-label="Run history">
       <div className="flex h-11 flex-none items-center gap-2 border-b border-line pr-2 pl-4">
         <span className="font-semibold">Run history</span>
-        <span className="text-xs text-fg-3">last 20</span>
+        <span className="text-xs text-fg-3">last 30</span>
         <span className="flex-1" />
         <IconButton label="Reload" onClick={load}>
           <RefreshCw />
@@ -49,6 +55,7 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
                   <span className="text-sm text-fg">{new Date(r.startedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
                   <span className="text-xs text-fg-3">
                     {r.status} · env {r.env}
+                    {r.replayOf && " · replay"}
                   </span>
                 </span>
                 <span className="text-right font-mono text-xs text-fg-2">
@@ -58,9 +65,21 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
               </button>
               {isOpen && (
                 <div className="grid gap-1 px-4 pb-3">
+                  <div className="flex items-center gap-2 pb-1">
+                    <Button
+                      size="sm"
+                      disabled={!r.snapshot || running}
+                      onClick={() => void replayRun(path, r)}
+                      title={r.snapshot ? "Run the flow as it was in this run, with the current environment" : "Recorded before replay existed: this run didn't save its flow"}
+                    >
+                      <RotateCcw /> Replay
+                    </Button>
+                    <span className="text-xs text-fg-3">{r.snapshot ? "Same requests as this run, current environment." : "Can't replay a run recorded before replay existed."}</span>
+                  </div>
                   {r.steps.map((s) => {
                     const p = prev?.steps.find((x) => x.id === s.id);
                     const changed = p && p.state !== s.state;
+                    const notTaken = s.state === "skipped" && Object.values(r.branches ?? {}).length > 0 && laneNotTaken(r, s.id);
                     return (
                       <div key={s.id} className="grid gap-0.5 rounded-md bg-bg px-2.5 py-1.5">
                         <div className="flex min-w-0 items-center gap-2">
@@ -89,6 +108,8 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
                             </span>
                           ))}
                         {s.hops.length > 0 && <span className="truncate pl-4 font-mono text-xs text-fg-3">{s.hops.map((h) => `${h.alias}${h.ok ? "" : " ⚠"}`).join(" → ")}</span>}
+                        {notTaken && <span className="pl-4 text-xs text-fg-3">not taken by the if block</span>}
+                        {(s.request || s.response) && <Exchange step={s} />}
                       </div>
                     );
                   })}
@@ -99,6 +120,52 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
         })}
       </div>
     </aside>
+  );
+}
+
+/** Whether a request sat in an if lane this run didn't take (from the run's own flow). */
+function laneNotTaken(r: RunRecord, stepId: string): boolean {
+  const blocks = ((r.snapshot as { steps?: { id: string; type: string; then?: { id: string }[]; else?: { id: string }[] }[] })?.steps ?? []).filter((b) => b.type === "if");
+  const b = blocks.find((x) => [...(x.then ?? []), ...(x.else ?? [])].some((s) => s.id === stepId));
+  const taken = b && r.branches?.[b.id];
+  return !!taken && !(b[taken] ?? []).some((s) => s.id === stepId);
+}
+
+/** The recorded request and response of one request in a past run, folded away until asked for. */
+function Exchange({ step }: { step: RunRecord["steps"][number] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="pl-4">
+      <button className="flex items-center gap-1 text-xs text-fg-3 hover:text-fg-2" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <ChevronRight className={cx("size-3 transition-transform", open && "rotate-90")} /> Request and response
+      </button>
+      {open && (
+        <div className="mt-1 grid gap-2 border-l border-line-strong pl-2.5">
+          {step.request && (
+            <div className="grid gap-1">
+              <span className="font-mono text-xs break-all text-fg select-text">
+                {step.method} {step.url}
+              </span>
+              <HeaderList rows={step.request.headers} bare narrow />
+              {step.request.body && <pre className="max-h-40 overflow-auto rounded bg-rail p-2 font-mono text-xs break-all whitespace-pre-wrap text-fg-2 select-text">{step.request.body}</pre>}
+            </div>
+          )}
+          {step.response && (
+            <div className="grid gap-1">
+              <span className={cx("font-mono text-xs font-semibold", step.response.status < 400 ? "text-ok" : "text-bad")}>{step.response.status}</span>
+              <HeaderList rows={step.response.headers} bare narrow />
+              {step.response.body && (
+                <pre className="max-h-56 overflow-auto rounded bg-rail p-2 font-mono text-xs break-all whitespace-pre-wrap text-fg-2 select-text">
+                  {step.response.body}
+                  {step.response.truncated && "\n… cut at 64 KB"}
+                </pre>
+              )}
+            </div>
+          )}
+          <span className="text-xs text-fg-3">Secrets and token-like fields are hidden in saved runs.</span>
+        </div>
+      )}
+    </div>
   );
 }
 

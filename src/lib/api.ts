@@ -39,6 +39,16 @@ export interface HttpRequest {
   cookieJar?: string | null;
   /** Project root; a file body must be a path inside it. */
   root?: string | null;
+  policy?: NetPolicy;
+}
+
+/** An environment's network rules (enforced in Rust): private addresses, and which public hosts. */
+export interface NetPolicy {
+  allowPrivate: boolean;
+  /** Empty means any public host; entries are exact hosts or `*.example.com`. */
+  allowHosts: string[];
+  /** Named in "blocked" messages. */
+  env: string;
 }
 
 export interface HttpResponse {

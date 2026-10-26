@@ -23,6 +23,7 @@ import {
   toggleSidebar,
   useStore,
 } from "../state/store";
+import { allSteps } from "../flows/model";
 import { cancelRun, runFlow } from "../flows/runner";
 import { confirmDeleteFlow, createFlow, useFlows } from "../flows/store";
 import { Popover } from "./Popover";
@@ -92,7 +93,7 @@ export function Sidebar() {
                 <button className={mainBtn} onClick={() => navigate({ type: "flow", id: f.path })} title={`.auxin/${f.path}`}>
                   <Workflow className={cx("size-4 flex-none", flowRuns[f.path]?.status === "running" ? "text-warm" : flowRuns[f.path]?.status === "failed" ? "text-bad" : flowRuns[f.path]?.status === "passed" ? "text-ok" : "text-fg-3")} aria-hidden />
                   <span className="flex-1 truncate font-medium">{f.name}</span>
-                  <span className="pr-1.5 font-mono text-sm text-fg-3 tabular-nums group-hover:hidden">{f.steps.length}</span>
+                  <span className="pr-1.5 font-mono text-sm text-fg-3 tabular-nums group-hover:hidden">{allSteps(f.steps).length}</span>
                 </button>
                 <RowAct label={`Delete ${f.name}`} onClick={() => void confirmDeleteFlow(f.path)}>
                   <Trash2 />

@@ -6,7 +6,7 @@ import { confirm } from "@tauri-apps/plugin-dialog";
 import { create } from "zustand";
 import { api } from "../lib/api";
 import { activeWorkspace, navigate, selectServices, toast, updateActiveWorkspace, useStore } from "../state/store";
-import { newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow, slugify, type EnvDoc, type FlowDoc, type FlowStep } from "./model";
+import { allSteps, mapSteps, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow, slugify, type EnvDoc, type FlowDoc, type FlowStep } from "./model";
 import type { FlowRunState, StepOutcome } from "./runner";
 import type { VarSources } from "./vars";
 
@@ -163,7 +163,7 @@ export function updateFlow(path: string, fn: (f: FlowDoc) => FlowDoc) {
       const { text, invalid } = serializeFlow(doc, lastValid.get(path));
       set((s) => {
         const inv = { ...s.invalid };
-        doc.steps.forEach((st) => delete inv[rk(path, st.id)]);
+        allSteps(doc.steps).forEach((st) => delete inv[rk(path, st.id)]);
         invalid.forEach((id) => (inv[rk(path, id)] = "Invalid JSON: not saved until it parses"));
         return { invalid: inv };
       });
@@ -175,7 +175,7 @@ export function updateFlow(path: string, fn: (f: FlowDoc) => FlowDoc) {
 }
 
 export function updateStep(path: string, stepId: string, patch: Partial<FlowStep>) {
-  updateFlow(path, (f) => ({ ...f, steps: f.steps.map((s) => (s.id === stepId ? { ...s, ...patch } : s)) }));
+  updateFlow(path, (f) => ({ ...f, steps: mapSteps(f.steps, (s) => (s.id === stepId ? { ...s, ...patch } : s)) }));
 }
 
 export async function createFlow(name = "New flow") {

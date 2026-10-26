@@ -2,6 +2,7 @@ import { Play, Rows3, Search, Square, Workflow } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { activeWorkspace, isLive, navigate, selectServices, setPalette, startService, stopService, useStore } from "../state/store";
+import { allSteps } from "../flows/model";
 import { runFlow } from "../flows/runner";
 import { useFlows } from "../flows/store";
 import { shownStatus, STATUS_TEXT, StatusMark } from "./status";
@@ -46,7 +47,7 @@ export function CommandPalette() {
       );
     }
     for (const f of flows) {
-      out.push({ id: "f" + f.path, label: f.name, hint: `Flow · ${f.steps.length} requests`, icon: <Workflow />, run: () => navigate({ type: "flow", id: f.path }) });
+      out.push({ id: "f" + f.path, label: f.name, hint: `Flow · ${allSteps(f.steps).length} requests`, icon: <Workflow />, run: () => navigate({ type: "flow", id: f.path }) });
       if (f.steps.length) out.push({ id: "rf" + f.path, label: `Run ${f.name}`, hint: "Flow", icon: <Play />, run: () => (navigate({ type: "flow", id: f.path }), void runFlow(f.path)) });
     }
     for (const g of ws?.groups ?? []) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { evalCheck, extractValue, getPath, parsePath, type ResponseView } from "./eval";
-import { parseFlow, serializeFlow, type Check } from "./model";
+import { isStep, parseFlow, serializeFlow, type Check } from "./model";
 import { computeTrace, correlationValues, isCorrelationValue, newTraceIds, type LogLineIn, type TraceService } from "./trace";
 
 const res = (body: unknown, extra: Partial<ResponseView> = {}): ResponseView => ({
@@ -95,12 +95,12 @@ describe("flow file: extract, checks, poll, map", () => {
     });
     const doc = parseFlow("flows/e.flow.json", text);
     expect(doc.services[0]).toEqual({ ref: "gateway", alias: "gw", x: 10, y: 20 });
-    expect(doc.steps[0].checks).toEqual([chk("status", "==", "200"), chk("body.ok", "exists")]);
-    expect(doc.steps[0].poll).toEqual({ until: [chk("body.status", "==", '"done"')], everyMs: 500, maxTries: 10 });
+    expect(doc.steps.filter(isStep)[0].checks).toEqual([chk("status", "==", "200"), chk("body.ok", "exists")]);
+    expect(doc.steps.filter(isStep)[0].poll).toEqual({ until: [chk("body.status", "==", '"done"')], everyMs: 500, maxTries: 10 });
     const out = JSON.parse(serializeFlow(doc).text);
-    expect(out.steps[0].checks).toEqual([{ left: "status", op: "==", right: 200 }, { left: "body.ok", op: "exists" }]);
+    expect(out.steps.filter(isStep)[0].checks).toEqual([{ left: "status", op: "==", right: 200 }, { left: "body.ok", op: "exists" }]);
     expect(out.steps[0].wait.until).toEqual([{ left: "body.status", op: "==", right: "done" }]);
-    expect(out.steps[0].extract).toEqual({ result: "body.result" });
+    expect(out.steps.filter(isStep)[0].extract).toEqual({ result: "body.result" });
     expect(out.dismissed).toEqual([{ from: "model", to: "gw" }]);
     expect(out.directions[0].evidence).toBe("gateway/.env:3  X=1");
   });

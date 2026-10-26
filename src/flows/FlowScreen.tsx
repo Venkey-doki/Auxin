@@ -3,43 +3,24 @@
  * Linear-style rows that open into an Insomnia-style request | response split
  * with the request's trace. docs/flows-spec.md §7.
  */
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import {
-  ArrowRight,
-  ChevronDown,
-  ChevronRight,
-  ClipboardPaste,
-  Copy,
-  FileJson,
-  FolderOpen,
-  GripVertical,
-  History,
-  Play,
-  Plus,
-  Settings2,
-  Square,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ChevronRight, ClipboardPaste, GripVertical, History, Play, Plus, Rows3, Settings2, Split, Square, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { EditableTitle } from "../components/GroupView";
 import { StatusMark, STATUS_TEXT, type Shown } from "../components/status";
-import { Button, cx, IconButton, inputClass, Seg, SegButton, TopBar } from "../components/ui";
-import { api } from "../lib/api";
-import { parseCurl, toCurl } from "../lib/curl";
-import type { Service } from "../lib/types";
-import { formatClock, MOD, SERVICE_COLORS } from "../lib/util";
-import { selectServices, startService, toast, useStore } from "../state/store";
+import { Button, cx, IconButton, TopBar } from "../components/ui";
+import { parseCurl } from "../lib/curl";
+import { MOD } from "../lib/util";
+import { useStore } from "../state/store";
 import { EnvPanel } from "./EnvPanel";
-import { autoLayout, FlowCanvas, type CanvasNode, type EdgeRun, type NodeRun } from "./FlowCanvas";
 import { HistoryPanel } from "./HistoryPanel";
-import { blankStep, CHECK_OPS, outsideWorkspace, type BodyKind, type Check, type CheckOp, type FlowDoc, type FlowStep } from "./model";
-import { formatBytes, formatMs, Json, KVTable, METHOD_COLOR, MethodBadge, METHODS, Tabs, VarInput } from "./parts";
-import { addDirections, cancelRun, cancelStep, isRunning, runFlow, sendStep, type StepOutcome } from "./runner";
-import { activeEnvName, confirmDeleteFlow, rk, saveEnv, serviceIdFor, servicePorts, setActiveEnv, updateFlow, updateStep, useFlows, varSources } from "./store";
-import type { TraceLine, TraceResult } from "./trace";
-import { resolve, resolveHidingSecrets, templatize } from "./vars";
+import type { Issue } from "./engine";
+import { addToLane, allSteps, blankBlock, blankStep, DEFAULT_NETWORK, moveItem, outsideWorkspace, removeItem, type BodyKind, type FlowBlock, type FlowDoc, type FlowStep, type Lane } from "./model";
+import { formatBytes, formatMs, MethodBadge } from "./parts";
+import { cancelRun, flowIssues, isRunning, runFlow, sendStep } from "./runner";
+import { ServiceMap } from "./ServiceMap";
+import { ChecksEditor, StepDetail } from "./StepDetail";
+import { activeEnvName, confirmDeleteFlow, rk, saveEnv, servicePorts, setActiveEnv, updateFlow, useFlows } from "./store";
+import { templatize } from "./vars";
 
 const CANVAS_KEY = "auxin.flowCanvasHeight";
 const readCanvasH = () => {
@@ -60,18 +41,20 @@ export function FlowScreen({ path }: { path: string }) {
   const run = useFlows((s) => s.runs[path]);
   const responses = useFlows((s) => s.responses);
   useStore((s) => s.config); // the chosen environment lives in the workspace config
+  useStore((s) => s.runtime); // service ports feed {{service}} variables, and so the issues below
   const [openId, setOpenId] = useState<string | null>(null);
   const [panel, setPanel] = useState<"env" | "history" | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [canvasH, setCanvasH] = useState(readCanvasH);
+  const steps = useMemo(() => (doc ? allSteps(doc.steps) : []), [doc]);
 
   // Open the first request once, when the flow is first shown; after that rows stay as the user leaves them.
   const autoOpened = useRef(false);
   useEffect(() => {
-    if (autoOpened.current || !doc?.steps[0]) return;
+    if (autoOpened.current || !steps[0]) return;
     autoOpened.current = true;
-    setOpenId(doc.steps[0].id);
-  }, [doc]);
+    setOpenId(steps[0].id);
+  }, [steps]);
 
   // ⌘↵ sends the open request, ⌘⇧↵ runs the flow.
   useEffect(() => {
@@ -82,16 +65,16 @@ export function FlowScreen({ path }: { path: string }) {
       if (e.repeat || isRunning(path)) return;
       if (e.shiftKey) void runFlow(path);
       else {
-        const st = doc.steps.find((s) => s.id === openId);
+        const st = steps.find((s) => s.id === openId);
         if (st) void sendStep(path, st);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doc, openId, path]);
+  }, [doc, steps, openId, path]);
 
-  // While a run is going, keep the request being sent open.
-  const activeStep = run?.status === "running" ? doc?.steps.find((s) => ["sending", "polling"].includes(responses[rk(path, s.id)]?.state ?? "")) : undefined;
+  // While a run is going, keep the request being sent open (the first, when several are in flight).
+  const activeStep = run?.status === "running" ? steps.find((s) => ["sending", "polling"].includes(responses[rk(path, s.id)]?.state ?? "")) : undefined;
   useEffect(() => {
     if (activeStep) setOpenId(activeStep.id);
   }, [activeStep?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -100,16 +83,39 @@ export function FlowScreen({ path }: { path: string }) {
   if (!doc) return <div className="grid flex-1 place-items-center text-fg-3">This flow no longer exists in .auxin/flows.</div>;
 
   const running = run?.status === "running";
-  const move = (from: string, to: string) =>
-    updateFlow(path, (f) => {
-      const steps = [...f.steps];
-      const a = steps.findIndex((s) => s.id === from);
-      const b = steps.findIndex((s) => s.id === to);
-      if (a < 0 || b < 0 || a === b) return f;
-      const [it] = steps.splice(a, 1);
-      steps.splice(b, 0, it);
-      return { ...f, steps };
-    });
+  const issues = flowIssues(doc);
+  const number = (id: string) => steps.findIndex((s) => s.id === id) + 1;
+  // Ids in the order rows appear, so a drag downward lands after its target.
+  const order = doc.steps.flatMap((i) => [i.id, ...(i.type === "http" ? [] : allSteps([i]).map((s) => s.id))]);
+  const dragTo = (target: string) => {
+    if (!dragId || dragId === target) return;
+    const down = order.indexOf(dragId) < order.indexOf(target);
+    updateFlow(path, (f) => ({ ...f, steps: moveItem(f.steps, dragId, down ? { after: target } : { before: target }) }));
+  };
+  const dragToLane = (lane: Lane) => dragId && updateFlow(path, (f) => ({ ...f, steps: moveItem(f.steps, dragId, { lane }) }));
+  const addTo = (lane: Lane) => {
+    const step = blankStep(steps.length + 1, "");
+    updateFlow(path, (f) => ({ ...f, steps: addToLane(f.steps, lane, step) }));
+    setOpenId(step.id);
+  };
+  const remove = (id: string) => updateFlow(path, (f) => ({ ...f, steps: removeItem(f.steps, id) }));
+  const drag = { dragId, locked: running, onDragStart: setDragId, onDragEnd: () => setDragId(null), dragTo };
+
+  const stepRow = (st: FlowStep, notTaken = false) => (
+    <StepRow
+      key={st.id}
+      path={path}
+      n={number(st.id)}
+      step={st}
+      open={openId === st.id}
+      onToggle={() => setOpenId(openId === st.id ? null : st.id)}
+      issues={issues.filter((i) => i.id === st.id)}
+      notTaken={notTaken}
+      {...drag}
+    >
+      <StepDetail doc={doc} step={st} locked={running} onRemove={() => remove(st.id)} />
+    </StepRow>
+  );
   const setH = (h: number) => {
     setCanvasH(h);
     try {
@@ -148,7 +154,7 @@ export function FlowScreen({ path }: { path: string }) {
             <Square /> Stop
           </Button>
         ) : (
-          <Button variant="primary" disabled={!doc.steps.length} onClick={() => void runFlow(path)} title={`Run every request in order (${MOD}⇧↵)`}>
+          <Button variant="primary" disabled={!steps.length} onClick={() => void runFlow(path)} title={`Run the flow (${MOD}⇧↵)`}>
             <Play /> Run flow
           </Button>
         )}
@@ -165,37 +171,34 @@ export function FlowScreen({ path }: { path: string }) {
               {doc.steps.length > 0 && (
                 <div className="mb-2 flex items-center gap-2">
                   <span className="text-xs font-semibold tracking-wider text-fg-3 uppercase">Requests</span>
-                  <span className="font-mono text-xs text-fg-3">{doc.steps.length}</span>
+                  <span className="font-mono text-xs text-fg-3">{steps.length}</span>
                   <span className="flex-1" />
                   <span className="text-xs text-fg-3">
                     <kbd className="font-mono">{MOD}↵</kbd> send · <kbd className="font-mono">{MOD}⇧↵</kbd> run all
                   </span>
                 </div>
               )}
+              {issues.length > 0 && <IssueStrip doc={doc} issues={issues} number={number} onOpen={setOpenId} />}
               {doc.steps.length > 0 && (
                 <div className="overflow-hidden rounded-lg border border-line">
-                  {doc.steps.map((st, i) => (
-                    <StepRow
-                      key={st.id}
-                      path={path}
-                      n={i + 1}
-                      step={st}
-                      open={openId === st.id}
-                      onToggle={() => setOpenId(openId === st.id ? null : st.id)}
-                      dragging={dragId === st.id}
-                      locked={running}
-                      onDragStart={() => setDragId(st.id)}
-                      onDragEnter={() => dragId && dragId !== st.id && move(dragId, st.id)}
-                      onDragEnd={() => setDragId(null)}
-                    >
-                      <StepDetail
-                        doc={doc}
-                        step={st}
-                        locked={running}
-                        onRemove={() => updateFlow(path, (f) => ({ ...f, steps: f.steps.filter((s) => s.id !== st.id) }))}
+                  {doc.steps.map((item) =>
+                    item.type === "http" ? (
+                      stepRow(item)
+                    ) : (
+                      <BlockView
+                        key={item.id}
+                        path={path}
+                        block={item}
+                        taken={run?.branches?.[item.id]}
+                        issues={issues.filter((i) => i.id === item.id)}
+                        onRemove={() => remove(item.id)}
+                        onAdd={addTo}
+                        onDropLane={dragToLane}
+                        stepRow={stepRow}
+                        {...drag}
                       />
-                    </StepRow>
-                  ))}
+                    ),
+                  )}
                 </div>
               )}
               <AddRequest doc={doc} onAdded={(id) => setOpenId(id)} />
@@ -213,215 +216,66 @@ function RunSummary({ doc }: { doc: FlowDoc }) {
   const run = useFlows((s) => s.runs[doc.path]);
   const responses = useFlows((s) => s.responses);
   if (!run) return null;
-  const outs = doc.steps.map((s) => responses[rk(doc.path, s.id)]);
+  const steps = allSteps(doc.steps);
+  const outs = steps.map((s) => responses[rk(doc.path, s.id)]);
   const total = outs.reduce((a, o) => a + (o?.res?.totalMs ?? 0), 0);
   const done = outs.filter((o) => o?.state === "passed").length;
+  // Requests in a lane that wasn't taken never run; they don't count toward "all passed".
+  const ran = outs.filter((o) => o && o.state !== "skipped").length;
   const failAt = outs.findIndex((o) => o?.state === "failed" || o?.state === "error");
   const [tone, text]: [Shown, string] =
     run.status === "running"
-      ? ["starting", `Running ${Math.min(done + 1, doc.steps.length)} of ${doc.steps.length}`]
+      ? ["starting", `Running · ${done} of ${steps.length} passed`]
       : run.status === "cancelled"
         ? ["stopped", "Stopped"]
         : run.status === "failed"
           ? ["crashed", `Failed at request ${failAt + 1} · ${formatMs(total)}`]
-          : ["running", `${doc.steps.length} of ${doc.steps.length} passed · ${formatMs(total)}`];
+          : ["running", `${done} of ${ran} passed · ${formatMs(total)}`];
   return (
     <span className={cx("flex min-w-0 flex-none items-center gap-1.5 truncate text-sm", STATUS_TEXT[tone])}>
       <StatusMark status={tone} size={9} /> {text}
+      {run.replayOf && <span className="text-fg-3">· replay</span>}
     </span>
   );
 }
 
-/* ---------------- service map ---------------- */
+/* ---------------- checks before running ---------------- */
 
-function ServiceMap({ doc, openId, height, setHeight }: { doc: FlowDoc; openId: string | null; height: number; setHeight: (h: number) => void }) {
-  const services = useStore(selectServices);
-  const runtime = useStore((s) => s.runtime);
-  const root = useFlows((s) => s.root);
-  const responses = useFlows((s) => s.responses);
-  const run = useFlows((s) => s.runs[doc.path]);
-  const [detecting, setDetecting] = useState(false);
-  const last = useRef<number | null>(null);
-
-  const nodes: CanvasNode[] = useMemo(
-    () =>
-      doc.services.map((f) => {
-        const service = services.find((s) => s.id === serviceIdFor(f.ref));
-        return {
-          ...f,
-          service,
-          running: !!service && runtime[service.id]?.status === "running",
-          port: service ? (runtime[service.id]?.port ?? service.portHint ?? undefined) : undefined,
-        };
-      }),
-    [doc.services, services, runtime], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-
-  // Which trace to show: the request being sent during a run, else the open one.
-  const focusStep =
-    (run?.status === "running" ? doc.steps.find((s) => ["sending", "polling"].includes(responses[rk(doc.path, s.id)]?.state ?? "")) : undefined) ??
-    doc.steps.find((s) => s.id === openId);
-  const out = focusStep ? responses[rk(doc.path, focusStep.id)] : undefined;
-  const trace = out?.trace;
-  const replay = useHopReplay(trace);
-  const focus = trace?.hops.length ? trace.hops.map((h) => h.alias) : null;
-
-  const detect = async (forDoc: FlowDoc = doc) => {
-    if (!root || forDoc.services.length < 2) return;
-    setDetecting(true);
-    try {
-      const infos = forDoc.services.map((f) => {
-        const svc = services.find((s) => s.id === serviceIdFor(f.ref));
-        const port = svc ? (runtime[svc.id]?.port ?? svc.portHint ?? null) : null;
-        return { alias: f.alias, path: serviceIdFor(f.ref), port };
-      });
-      const found = await api.detectDirections(root, infos);
-      addDirections(
-        forDoc.path,
-        found.map((e) => ({ from: e.from, to: e.to, source: e.source, evidence: e.evidence.join("\n"), confirmed: true })),
-      );
-      if (!found.length && infos.some((i) => i.port == null))
-        toast("info", "No directions found yet", "Some services' ports aren't known. Start them once so Auxin learns their ports, then detect again.");
-    } catch (e) {
-      toast("error", "Couldn't detect directions", String(e));
-    } finally {
-      setDetecting(false);
-    }
+/** What would stop the flow from running, found without sending anything. Errors block Run; warnings don't. */
+function IssueStrip({ doc, issues, number, onOpen }: { doc: FlowDoc; issues: Issue[]; number: (id: string) => number; onOpen: (id: string) => void }) {
+  const errors = issues.filter((i) => i.level === "error").length;
+  const [all, setAll] = useState(false);
+  const shown = all ? issues : issues.slice(0, 4);
+  const label = (id: string) => {
+    const n = number(id);
+    if (n) return `Request ${n}`;
+    return doc.steps.find((i) => i.id === id)?.type === "if" ? "If block" : "Parallel block";
   };
-
-  // A flow with services but no directions yet: detect once when it's opened.
-  const autoDetected = useRef(false);
-  useEffect(() => {
-    if (autoDetected.current || doc.services.length < 2 || doc.directions.length || !root) return;
-    autoDetected.current = true;
-    void detect();
-  }, [doc.services.length, doc.directions.length, root]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const toggleService = (svc: Service) => {
-    const ref = root && svc.path.startsWith(root + "/") ? svc.path.slice(root.length + 1) : svc.path;
-    const has = doc.services.find((x) => x.ref === ref);
-    if (has) {
-      updateFlow(doc.path, (f) => ({
-        ...f,
-        services: f.services.filter((x) => x.ref !== ref),
-        directions: f.directions.filter((d) => d.from !== has.alias && d.to !== has.alias),
-      }));
-      return;
-    }
-    const taken = new Set(doc.services.map((x) => x.alias));
-    let alias = svc.name;
-    for (let i = 2; taken.has(alias); i++) alias = `${svc.name}-${i}`;
-    const next: FlowDoc = { ...doc, services: [...doc.services, { ref, alias }] };
-    updateFlow(doc.path, (f) => ({ ...f, services: [...f.services, { ref, alias }] }));
-    void detect(next);
-  };
-
-  if (height === 0)
-    return (
-      <button
-        className="flex h-8 flex-none items-center gap-2 border-b border-line bg-rail px-6 text-left text-xs text-fg-3 hover:text-fg-2"
-        onClick={() => setHeight(280)}
-      >
-        <ChevronRight className="size-3.5" /> Service map
-        <span className="font-mono">
-          {doc.services.length} services · {doc.directions.length} directions
-        </span>
-      </button>
-    );
-
   return (
-    <div className="relative flex-none border-b border-line" style={{ height }}>
-      <FlowCanvas
-        doc={doc}
-        nodes={nodes}
-        nodeRuns={replay.nodes}
-        edgeRuns={replay.edges}
-        focus={focus}
-        focusLabel={
-          focusStep && focus
-            ? `Path of request ${doc.steps.indexOf(focusStep) + 1}${trace?.hops.some((h) => h.approx) ? " · ≈ times from logs" : ""}`
-            : undefined
-        }
-        workspaceServices={services}
-        onMove={(alias, x, y) => updateFlow(doc.path, (f) => ({ ...f, services: f.services.map((s) => (s.alias === alias ? { ...s, x, y } : s)) }))}
-        onArrange={() => {
-          const p = autoLayout(
-            doc.services.map((s) => s.alias),
-            doc.directions,
-          );
-          updateFlow(doc.path, (f) => ({ ...f, services: f.services.map((s) => ({ ...s, ...p[s.alias] })) }));
-        }}
-        onToggleService={toggleService}
-        onAddDirection={(from, to) => addDirections(doc.path, [{ from, to, source: "manual", evidence: "Added by hand", confirmed: true }])}
-        onKeep={(d) =>
-          updateFlow(doc.path, (f) => ({ ...f, directions: f.directions.map((x) => (x.from === d.from && x.to === d.to ? { ...x, confirmed: true } : x)) }))
-        }
-        onRemove={(d) =>
-          updateFlow(doc.path, (f) => ({
-            ...f,
-            directions: f.directions.filter((x) => !(x.from === d.from && x.to === d.to)),
-            dismissed: [...f.dismissed, { from: d.from, to: d.to }],
-          }))
-        }
-        onDetect={() => void detect()}
-        detecting={detecting}
-      />
-      <button
-        className="absolute top-3 left-1/2 z-10 -translate-x-1/2 rounded-md bg-surface/90 px-2 py-0.5 text-xs text-fg-3 hover:text-fg"
-        onClick={() => setHeight(0)}
-        title="Collapse the service map"
-      >
-        <ChevronDown className="inline size-3.5" /> Hide map
-      </button>
-      <div
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize service map"
-        className="group absolute inset-x-0 -bottom-1.5 z-10 flex h-3 cursor-row-resize items-center justify-center"
-        onPointerDown={(e) => {
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-          last.current = e.clientY;
-        }}
-        onPointerMove={(e) => {
-          if (last.current == null) return;
-          setHeight(Math.min(600, Math.max(140, height + e.clientY - last.current)));
-          last.current = e.clientY;
-        }}
-        onPointerUp={() => (last.current = null)}
-      >
-        <span className="h-1 w-10 rounded-full bg-line-strong transition-colors group-hover:bg-fg-3" />
+    <div className={cx("mb-3 rounded-lg border px-3 py-2", errors ? "border-bad/35 bg-bad/[0.06]" : "border-warm/30 bg-warm/[0.05]")} role="status">
+      <div className={cx("flex items-center gap-2 text-sm font-semibold", errors ? "text-bad-soft" : "text-warm")}>
+        <TriangleAlert className="size-3.5" aria-hidden />
+        {errors
+          ? `${errors === 1 ? "1 problem" : `${errors} problems`} to fix before running`
+          : `${issues.length === 1 ? "1 thing" : `${issues.length} things`} to check`}
       </div>
+      <ul className="mt-1 grid">
+        {shown.map((i, k) => (
+          <li key={i.id + k}>
+            <button className="flex w-full min-w-0 items-baseline gap-2 rounded px-1 py-0.5 text-left text-sm hover:bg-surface-2" onClick={() => onOpen(i.id)}>
+              <span className={cx("flex-none font-medium", i.level === "error" ? "text-fg" : "text-fg-2")}>{label(i.id)}</span>
+              <span className="min-w-0 text-fg-2">{i.message}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {issues.length > 4 && (
+        <button className="mt-0.5 px-1 text-xs text-fg-3 hover:text-fg-2" onClick={() => setAll((v) => !v)}>
+          {all ? "Show fewer" : `Show all ${issues.length}`}
+        </button>
+      )}
     </div>
   );
-}
-
-/** Replays a trace's hops one by one (amber, then green or red) whenever a new trace lands. */
-function useHopReplay(trace: TraceResult | undefined) {
-  const [shown, setShown] = useState(0);
-  useEffect(() => {
-    setShown(0);
-    if (!trace) return;
-    let i = 0;
-    const t = window.setInterval(() => {
-      i++;
-      setShown(i);
-      if (i >= trace.hops.length * 2) window.clearInterval(t);
-    }, 160);
-    return () => window.clearInterval(t);
-  }, [trace]);
-  return useMemo(() => {
-    const nodes: Record<string, NodeRun> = {};
-    const edges: Record<string, EdgeRun> = {};
-    if (!trace) return { nodes, edges };
-    trace.hops.forEach((h, i) => {
-      const step = shown - i * 2;
-      if (step < 0) return;
-      const done = step >= 1;
-      nodes[h.alias] = done ? { state: h.ok ? "ok" : "bad", ms: h.ms, approx: h.approx } : { state: "live" };
-      if (i > 0) edges[`${trace.hops[i - 1].alias}→${h.alias}`] = done ? (h.ok ? "ok" : "bad") : "live";
-    });
-    return { nodes, edges };
-  }, [trace, shown]);
 }
 
 /* ---------------- rows ---------------- */
@@ -437,65 +291,93 @@ const STATE_MARK: Record<string, Shown> = {
   cancelled: "stopped",
 };
 
+interface DragProps {
+  dragId: string | null;
+  locked: boolean;
+  onDragStart: (id: string) => void;
+  onDragEnd: () => void;
+  /** Moves the dragged row next to `target`. */
+  dragTo: (target: string) => void;
+}
+
+function Grip({ id, locked, onDragStart, onDragEnd }: Pick<DragProps, "locked" | "onDragStart" | "onDragEnd"> & { id: string }) {
+  return (
+    <span
+      draggable={!locked}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart(id);
+      }}
+      onDragEnd={onDragEnd}
+      className={cx("grid h-8 w-5 flex-none place-items-center text-fg-3 opacity-0", !locked && "cursor-grab group-hover:opacity-100 active:cursor-grabbing")}
+      aria-label="Drag to reorder"
+      title="Drag to reorder"
+    >
+      <GripVertical className="size-3.5" />
+    </span>
+  );
+}
+
 function StepRow({
   path,
   n,
   step,
   open,
-  locked,
   onToggle,
+  issues,
+  notTaken,
   children,
-  dragging,
+  dragId,
+  locked,
   onDragStart,
-  onDragEnter,
   onDragEnd,
-}: {
+  dragTo,
+}: DragProps & {
   path: string;
   n: number;
   step: FlowStep;
   open: boolean;
-  locked: boolean;
   onToggle: () => void;
+  issues: Issue[];
+  /** In an if lane the last run didn't take. */
+  notTaken: boolean;
   children: ReactNode;
-  dragging: boolean;
-  onDragStart: () => void;
-  onDragEnter: () => void;
-  onDragEnd: () => void;
 }) {
   const out = useFlows((s) => s.responses[rk(path, step.id)]);
   const r = out?.res;
-  const mark = out ? STATE_MARK[out.state] : undefined;
+  const mark = out && !(notTaken && out.state === "skipped") ? STATE_MARK[out.state] : undefined;
+  const issue = issues.find((i) => i.level === "error") ?? issues[0];
   return (
-    <div className={cx("border-b border-line last:border-b-0", dragging && "opacity-50")} onDragEnter={onDragEnter} onDragOver={(e) => e.preventDefault()}>
-      <div className={cx("group flex h-11 items-center gap-3 pr-3 pl-1 transition-colors", open ? "bg-surface-2" : "bg-surface hover:bg-surface-2")}>
-        <span
-          draggable={!locked}
-          onDragStart={(e) => {
-            e.dataTransfer.effectAllowed = "move";
-            onDragStart();
-          }}
-          onDragEnd={onDragEnd}
-          className={cx(
-            "grid h-8 w-5 flex-none place-items-center text-fg-3 opacity-0",
-            !locked && "cursor-grab group-hover:opacity-100 active:cursor-grabbing",
-          )}
-          aria-label="Drag to reorder"
-          title="Drag to reorder"
-        >
-          <GripVertical className="size-3.5" />
-        </span>
+    <div className={cx("border-b border-line last:border-b-0", dragId === step.id && "opacity-50")} onDragEnter={() => dragTo(step.id)} onDragOver={(e) => e.preventDefault()}>
+      <div className={cx("group flex h-11 items-center gap-3 pr-3 pl-1 transition-colors", open ? "bg-surface-2" : "bg-surface hover:bg-surface-2", notTaken && !open && "opacity-60")}>
+        <Grip id={step.id} locked={locked} onDragStart={onDragStart} onDragEnd={onDragEnd} />
         <button onClick={onToggle} aria-expanded={open} className="flex h-full min-w-0 flex-1 items-center gap-3 text-left">
           <ChevronRight className={cx("size-3.5 flex-none text-fg-3 transition-transform", open && "rotate-90")} />
           <span className="w-5 flex-none font-mono text-xs text-fg-3 tabular-nums">{n}</span>
           <MethodBadge method={step.method} />
           <span className="flex-none text-base font-medium">{step.name}</span>
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg-3">{step.url}</span>
+          {issue && (
+            <span title={issue.message} className="flex-none">
+              <TriangleAlert className={cx("size-3.5", issue.level === "error" ? "text-bad-soft" : "text-warm")} aria-label={issue.message} />
+            </span>
+          )}
           {step.body.kind === "file" && outsideWorkspace(step.body.file) && (
             <span className="flex-none rounded bg-warm/15 px-1.5 text-xs text-warm" title={`${step.body.file} is outside the workspace, so it won't be sent`}>
               file outside workspace
             </span>
           )}
           {step.poll && <span className="flex-none rounded bg-surface-3 px-1.5 text-xs text-fg-2">poll</span>}
+          {step.retry && (
+            <span className="flex-none rounded bg-surface-3 px-1.5 text-xs text-fg-2" title={`Re-sent up to ${step.retry.max} more times ${step.retry.on === "any" ? "if it fails" : "on errors and 5xx"}`}>
+              retry ×{step.retry.max}
+            </span>
+          )}
+          {step.onFailure === "continue" && (
+            <span className="flex-none rounded bg-surface-3 px-1.5 text-xs text-fg-2" title="The flow keeps going if this request fails">
+              keeps going
+            </span>
+          )}
           {step.extract.some((e) => e.key.trim()) && (
             <span className="max-w-40 flex-none truncate rounded bg-surface-3 px-1.5 text-xs text-fg-2">
               →{" "}
@@ -506,8 +388,14 @@ function StepRow({
             </span>
           )}
           {out?.state === "polling" && <span className="flex-none font-mono text-xs text-warm">try {out.tries}</span>}
-          {out?.state === "skipped" && <span className="flex-none text-xs text-fg-3">skipped</span>}
+          {out?.retrying && out.state === "sending" && (
+            <span className="flex-none font-mono text-xs text-warm">
+              retry {out.retrying.attempt}/{out.retrying.of}
+            </span>
+          )}
+          {out?.state === "skipped" && <span className="flex-none text-xs text-fg-3">{notTaken ? "not taken" : "skipped"}</span>}
           {out?.state === "error" && <span className="flex-none text-xs text-bad-soft">not sent</span>}
+          {(out?.attempts ?? 1) > 1 && out?.state !== "sending" && <span className="flex-none font-mono text-xs text-fg-3">{out!.attempts} attempts</span>}
           {r && <span className={cx("flex-none font-mono text-xs font-semibold", r.status < 400 ? "text-ok" : "text-bad")}>{r.status}</span>}
           {r && <span className="w-14 flex-none text-right font-mono text-xs text-fg-3">{formatMs(r.totalMs)}</span>}
           {mark && <StatusMark status={mark} size={10} className={STATUS_TEXT[mark]} />}
@@ -518,704 +406,124 @@ function StepRow({
   );
 }
 
-/* ---------------- request | response ---------------- */
+/* ---------------- blocks ---------------- */
 
-type ReqTab = "body" | "headers" | "extract" | "checks" | "poll" | "curl";
-const BODY_KINDS: { id: BodyKind; label: string }[] = [
-  { id: "none", label: "None" },
-  { id: "json", label: "JSON" },
-  { id: "text", label: "Text" },
-  { id: "form", label: "Form" },
-  { id: "file", label: "File" },
-];
+/**
+ * An if or parallel block: a header row, then its lanes of requests, each
+ * hung from a 1px rail so it reads as part of the block.
+ */
+function BlockView({
+  path,
+  block,
+  taken,
+  issues,
+  onRemove,
+  onAdd,
+  onDropLane,
+  stepRow,
+  ...drag
+}: DragProps & {
+  path: string;
+  block: FlowBlock;
+  /** The lane the last run took (if blocks). */
+  taken?: "then" | "else";
+  issues: Issue[];
+  onRemove: () => void;
+  onAdd: (lane: Lane) => void;
+  onDropLane: (lane: Lane) => void;
+  stepRow: (st: FlowStep, notTaken?: boolean) => ReactNode;
+}) {
+  const [editing, setEditing] = useState(block.type === "if" && !block.when.some((c) => c.left.trim()));
+  const isIf = block.type === "if";
+  const issue = issues.find((i) => i.level === "error") ?? issues[0];
+  const conditions = isIf ? block.when.filter((c) => c.left.trim()) : [];
+  const summary = conditions.map((c) => (c.op === "exists" || c.op === "!exists" ? `${c.left} ${c.op}` : `${c.left} ${c.op} ${c.right}`)).join("  and  ");
 
-function useServiceColors(doc: FlowDoc) {
-  const services = useStore(selectServices);
-  return useMemo(() => {
-    const m: Record<string, number> = Object.fromEntries(services.map((s) => [s.name, s.color]));
-    for (const f of doc.services) {
-      const svc = services.find((s) => s.id === serviceIdFor(f.ref));
-      if (svc) m[f.alias] = svc.color;
-    }
-    return m;
-  }, [services, doc.services]);
-}
-
-function StepDetail({ doc, step, locked, onRemove }: { doc: FlowDoc; step: FlowStep; locked: boolean; onRemove: () => void }) {
-  const path = doc.path;
-  const out = useFlows((s) => s.responses[rk(path, step.id)]);
-  const invalid = useFlows((s) => s.invalid[rk(path, step.id)]);
-  const extracted = useFlows((s) => s.extracted[path]);
-  useFlows((s) => s.envs);
-  useStore((s) => s.runtime);
-  const colors = useServiceColors(doc);
-  const src = varSources(doc, extracted);
-  const [tab, setTab] = useState<ReqTab>(step.body.kind !== "none" ? "body" : "headers");
-  const busy = out?.state === "sending" || out?.state === "polling";
-  const patch = (p: Partial<FlowStep>) => updateStep(path, step.id, p);
-  const preview = resolveHidingSecrets(step.url, src);
-  const missing = resolve(step.url, src).missing;
-  const fromEarlier = missing.filter((m) => doc.steps.some((s) => s.id !== step.id && s.extract.some((e) => e.key === m)));
-
-  return (
-    // Side by side when there's room; stacked when a side panel narrows the view.
-    <div className="@container border-t border-line bg-bg">
-      <div className="grid grid-cols-1 divide-y divide-line @[860px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] @[860px]:divide-x @[860px]:divide-y-0">
-        <div className="flex min-w-0 flex-col">
-          <div className="flex items-center gap-2 px-3 pt-3">
-            <input
-              className="h-7 min-w-0 flex-1 rounded px-1.5 text-base font-semibold outline-none hover:bg-surface-2 focus:bg-rail"
-              value={step.name}
-              onChange={(e) => patch({ name: e.target.value })}
-              aria-label="Request name"
-            />
-            <IconButton label="Delete request" onClick={onRemove} disabled={locked}>
-              <Trash2 />
-            </IconButton>
-          </div>
-          <div className="flex items-center gap-2 p-3">
-            <div className="flex min-w-0 flex-1 items-center rounded-md border border-line-strong bg-rail focus-within:border-paper/70">
-              <select
-                className="h-8 flex-none appearance-none rounded-l-md bg-transparent pr-6 pl-2.5 font-mono text-xs font-semibold"
-                style={{ color: METHOD_COLOR[step.method] }}
-                value={step.method}
-                onChange={(e) => patch({ method: e.target.value })}
-                aria-label="Method"
-              >
-                {METHODS.map((m) => (
-                  <option key={m}>{m}</option>
-                ))}
-              </select>
-              <span className="h-5 w-px bg-line-strong" aria-hidden />
-              <VarInput
-                value={step.url}
-                onChange={(url) => patch({ url })}
-                src={src}
-                serviceColors={colors}
-                placeholder="{{service}}/path"
-                label="URL"
-                onEnter={() => !locked && void sendStep(path, step)}
-              />
-            </div>
-            {busy ? (
-              <Button className="h-8" onClick={() => cancelStep(path, step.id)} disabled={locked}>
-                <Square /> Cancel
-              </Button>
-            ) : (
-              <Button variant="primary" className="h-8" onClick={() => void sendStep(path, step)} disabled={!step.url.trim() || locked}>
-                <Play /> Send
-              </Button>
-            )}
-          </div>
-          <div className={cx("-mt-1 truncate px-3 pb-2 font-mono text-xs", missing.length ? "text-warm" : "text-fg-3")} title={preview}>
-            {step.url ? preview : "Type a URL, or start with {{service-name}}"}
-            {missing.length > 0 &&
-              (fromEarlier.length === missing.length ? "  · filled in by an earlier request" : `  · no value for ${missing.map((m) => `{{${m}}}`).join(", ")}`)}
-          </div>
-          <Tabs
-            tabs={[
-              { id: "body", label: "Body", dot: !!invalid },
-              { id: "headers", label: "Headers", count: step.headers.filter((h) => h.key.trim()).length },
-              { id: "extract", label: "Extract", count: step.extract.filter((e) => e.key.trim()).length },
-              { id: "checks", label: "Checks", count: step.checks.filter((c) => c.left.trim()).length },
-              { id: "poll", label: step.poll ? "Poll · on" : "Poll" },
-              { id: "curl", label: "curl" },
-            ]}
-            value={tab}
-            onChange={setTab}
-          />
-          <div className="h-[340px] overflow-y-auto p-3">
-            {tab === "body" && <BodyEditor path={path} step={step} invalid={invalid} />}
-            {tab === "headers" && (
-              <KVTable
-                rows={step.headers}
-                onChange={(headers) => patch({ headers })}
-                keyPh="Header"
-                valPh="Value · {{variables}} work here"
-                hint={doc.injectHeaders ? "Auxin also adds X-Request-ID and traceparent so it can trace this request through your services' logs." : undefined}
-              />
-            )}
-            {tab === "extract" && (
-              <KVTable
-                rows={step.extract}
-                onChange={(extract) => patch({ extract })}
-                keyPh="variable, e.g. jobId"
-                valPh="body.jobId · header.location · body.items[0].id"
-                hint={
-                  <>
-                    Each value becomes <span className="font-mono">{"{{variable}}"}</span> for the requests after this one.
-                  </>
-                }
-              />
-            )}
-            {tab === "checks" && (
-              <ChecksEditor
-                checks={step.checks}
-                onChange={(checks) => patch({ checks })}
-                empty="With no checks, the request passes when the status is below 400."
-              />
-            )}
-            {tab === "poll" && <PollEditor step={step} onChange={(poll) => patch({ poll })} />}
-            {tab === "curl" && <CurlExport doc={doc} step={step} />}
-          </div>
-        </div>
-        <ResponsePanel doc={doc} out={out} onCancel={() => cancelStep(path, step.id)} />
-      </div>
-    </div>
-  );
-}
-
-function ChecksEditor({ checks, onChange, empty }: { checks: Check[]; onChange: (c: Check[]) => void; empty?: string }) {
-  const cell = "h-8 w-full bg-transparent px-2.5 font-mono text-sm text-fg outline-none placeholder:text-fg-3 focus:bg-rail";
-  return (
-    <div className="grid gap-2">
-      <div className="overflow-hidden rounded-md border border-line">
-        {checks.map((c, i) => {
-          const set = (p: Partial<Check>) => onChange(checks.map((x, j) => (j === i ? { ...x, ...p } : x)));
-          const unary = c.op === "exists" || c.op === "!exists";
-          return (
-            <div key={i} className="group grid grid-cols-[minmax(0,2fr)_112px_minmax(0,2fr)_28px] divide-x divide-line border-b border-line">
-              <input
-                className={cell}
-                value={c.left}
-                placeholder="status · body.status · time"
-                onChange={(e) => set({ left: e.target.value })}
-                aria-label="What to check"
-                spellCheck={false}
-              />
-              <select
-                className="h-8 appearance-none bg-transparent px-2 font-mono text-sm text-fg outline-none focus:bg-rail"
-                value={c.op}
-                onChange={(e) => set({ op: e.target.value as CheckOp })}
-                aria-label="Operator"
-              >
-                {CHECK_OPS.map((op) => (
-                  <option key={op}>{op}</option>
-                ))}
-              </select>
-              <input
-                className={cell}
-                value={unary ? "" : c.right}
-                disabled={unary}
-                placeholder={unary ? "" : '200 · "done" · true'}
-                onChange={(e) => set({ right: e.target.value })}
-                aria-label="Expected value"
-                spellCheck={false}
-              />
-              <button
-                className="grid place-items-center text-fg-3 opacity-0 group-hover:opacity-100 hover:text-bad-soft focus-visible:opacity-100"
-                onClick={() => onChange(checks.filter((_, j) => j !== i))}
-                aria-label="Remove check"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-          );
-        })}
-        <button
-          className="flex h-8 w-full items-center gap-1.5 px-2.5 text-sm text-fg-3 hover:bg-surface-2 hover:text-fg-2"
-          onClick={() => onChange([...checks, { left: checks.length ? "" : "status", op: "==", right: checks.length ? "" : "200" }])}
-        >
-          <Plus className="size-3.5" /> Add check
-        </button>
-      </div>
-      <span className="text-xs text-fg-3">{checks.length ? "If a check fails, the flow stops here and later requests are skipped." : empty}</span>
-    </div>
-  );
-}
-
-function PollEditor({ step, onChange }: { step: FlowStep; onChange: (p: FlowStep["poll"]) => void }) {
-  const p = step.poll;
-  return (
-    <div className="grid gap-3 text-sm">
-      <label className="flex items-center gap-2 text-fg-2">
-        <input
-          type="checkbox"
-          checked={!!p}
-          onChange={(e) => onChange(e.target.checked ? { until: [{ left: "body.status", op: "==", right: '"done"' }], everyMs: 1000, maxTries: 30 } : null)}
-        />
-        Repeat this request until a condition holds
-      </label>
-      {p && (
-        <>
-          <ChecksEditor checks={p.until} onChange={(until) => onChange({ ...p, until })} />
-          <div className="flex flex-wrap items-center gap-2 text-fg-2">
-            Every
-            <input
-              className={cx(inputClass, "h-8 w-20 font-mono text-sm")}
-              type="number"
-              min={0.1}
-              step={0.5}
-              value={p.everyMs / 1000}
-              onChange={(e) => onChange({ ...p, everyMs: Math.max(100, Math.round(Number(e.target.value) * 1000) || 1000) })}
-              aria-label="Seconds between tries"
-            />
-            seconds, at most
-            <input
-              className={cx(inputClass, "h-8 w-20 font-mono text-sm")}
-              type="number"
-              min={1}
-              value={p.maxTries}
-              onChange={(e) => onChange({ ...p, maxTries: Math.max(1, Math.round(Number(e.target.value)) || 1) })}
-              aria-label="Maximum tries"
-            />
-            tries.
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function BodyEditor({ path, step, invalid }: { path: string; step: FlowStep; invalid?: string }) {
-  const root = useFlows((s) => s.root);
-  const patchBody = (p: Partial<FlowStep["body"]>) => updateStep(path, step.id, { body: { ...step.body, ...p } });
-  const [filePreview, setFilePreview] = useState<{ text: string; size: number } | string | null>(null);
-
-  useEffect(() => {
-    // Files outside the workspace are never sent, so they aren't read for a preview either.
-    if (step.body.kind !== "file" || !step.body.file || !root || outsideWorkspace(step.body.file)) return setFilePreview(null);
-    api
-      .filePreview(`${root}/${step.body.file}`)
-      .then(([text, size]) => setFilePreview({ text, size }))
-      .catch((e) => setFilePreview(String(e)));
-  }, [step.body.kind, step.body.file, root]);
-
-  const chooseFile = async () => {
-    const picked = await openDialog({ multiple: false, directory: false, defaultPath: root ?? undefined, title: "Choose a body file" });
-    if (typeof picked !== "string") return;
-    patchBody({ file: root && picked.startsWith(root + "/") ? picked.slice(root.length + 1) : picked });
-  };
-
-  return (
-    <div className="grid h-full grid-rows-[auto_1fr] gap-2">
-      <div className="flex items-center gap-2">
-        <Seg label="Body type">
-          {BODY_KINDS.map((k) => (
-            <SegButton key={k.id} active={step.body.kind === k.id} onClick={() => patchBody({ kind: k.id })}>
-              {k.label}
-            </SegButton>
-          ))}
-        </Seg>
-        {invalid && <span className="truncate text-xs text-warm">{invalid}</span>}
-      </div>
-      {step.body.kind === "none" && <p className="text-sm text-fg-3">This request has no body.</p>}
-      {(step.body.kind === "json" || step.body.kind === "text") && (
-        <textarea
-          className={cx(
-            "h-full w-full resize-none rounded-md border bg-rail p-3 font-mono text-sm leading-5 text-fg outline-none focus:border-paper/70",
-            invalid ? "border-warm/60" : "border-line",
-          )}
-          value={step.body.text}
-          onChange={(e) => patchBody({ text: e.target.value })}
-          placeholder={step.body.kind === "json" ? '{\n  "key": "value",\n  "id": "{{jobId}}"\n}' : "Plain text body"}
-          spellCheck={false}
-          aria-label="Body"
-        />
-      )}
-      {step.body.kind === "form" && (
-        <KVTable rows={step.body.form} onChange={(form) => patchBody({ form })} keyPh="field" valPh="value" hint="Sent as application/x-www-form-urlencoded." />
-      )}
-      {step.body.kind === "file" && (
-        <div className="grid content-start gap-2">
-          <div className="flex gap-2">
-            <input
-              className="h-8 min-w-0 flex-1 rounded-md border border-line-strong bg-rail px-2.5 font-mono text-sm text-fg outline-none focus:border-paper/70"
-              value={step.body.file}
-              onChange={(e) => patchBody({ file: e.target.value })}
-              placeholder="path/relative/to/workspace.json"
-              aria-label="Body file"
-              spellCheck={false}
-            />
-            <Button className="h-8" onClick={() => void chooseFile()}>
-              <FolderOpen /> Choose…
-            </Button>
-          </div>
-          <span className="text-xs text-fg-3">
-            Sent as-is (variables in the file aren't replaced). Paths are relative to the workspace, so teammates can use the same flow.
-          </span>
-          {outsideWorkspace(step.body.file) && (
-            <span className="text-xs text-warm">This file is outside the workspace, so Auxin won't send it. Move it into the workspace folder and choose it again.</span>
-          )}
-          {typeof filePreview === "string" && <span className="text-xs text-bad-soft">{filePreview}</span>}
-          {filePreview && typeof filePreview === "object" && (
-            <div className="overflow-hidden rounded-md border border-line">
-              <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5 text-xs text-fg-3">
-                <FileJson className="size-3.5" /> {formatBytes(filePreview.size)}
-                {filePreview.size > filePreview.text.length && " · showing the start"}
-              </div>
-              <pre className="max-h-48 overflow-auto p-3 font-mono text-xs text-fg-2 select-text">{filePreview.text}</pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CurlExport({ doc, step }: { doc: FlowDoc; step: FlowStep }) {
-  const extracted = useFlows((s) => s.extracted[doc.path]);
-  const src = varSources(doc, extracted);
-  const root = useFlows((s) => s.root);
-  const build = (withSecrets: boolean) => {
-    const sub = (t: string) => (withSecrets ? resolve(t, src).text : resolveHidingSecrets(t, src));
-    const body =
-      step.body.kind === "json" || step.body.kind === "text"
-        ? sub(step.body.text)
-        : step.body.kind === "form"
-          ? step.body.form.map((f) => `${encodeURIComponent(f.key)}=${encodeURIComponent(sub(f.value))}`).join("&")
-          : step.body.kind === "file" && step.body.file
-            ? `@${step.body.file.startsWith("/") ? step.body.file : `${root}/${step.body.file}`}`
-            : "";
-    return toCurl({ method: step.method, url: sub(step.url), headers: step.headers.filter((h) => h.key.trim()).map((h) => [h.key, sub(h.value)]), body });
-  };
-  const copy = async (withSecrets: boolean) => {
-    await navigator.clipboard?.writeText(build(withSecrets));
-    toast(
-      "info",
-      withSecrets ? "Copied with secrets filled in" : "Copied as curl",
-      withSecrets ? "Careful where you paste it." : "Secrets stay as {{placeholders}}.",
-    );
-  };
-  return (
-    <div className="grid gap-2">
-      <pre className="overflow-x-auto rounded-md border border-line bg-rail p-3 font-mono text-sm text-fg-2 select-text">{build(false)}</pre>
-      <div className="flex gap-2">
-        <Button size="sm" onClick={() => void copy(false)}>
-          <Copy /> Copy as curl
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => void copy(true)}>
-          Copy with secrets
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- response ---------------- */
-
-function ResponsePanel({ doc, out, onCancel }: { doc: FlowDoc; out?: StepOutcome; onCancel: () => void }) {
-  const hasTrace = !!out?.trace || !!out?.tracing;
-  const [tab, setTab] = useState<"trace" | "body" | "headers" | "request">("body");
-  // Switch to the trace once per response, when it appears; then leave the choice to the user.
-  const switchedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (hasTrace && out && switchedFor.current !== out.reqId) {
-      switchedFor.current = out.reqId;
-      setTab("trace");
-    }
-  }, [hasTrace, out?.reqId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const services = useStore(selectServices);
-  const runtime = useStore((s) => s.runtime);
-
-  const center = (children: ReactNode) => <div className="grid min-w-0 content-center justify-items-center gap-3 p-8 text-center">{children}</div>;
-
-  if (!out)
-    return center(
-      <span className="grid justify-items-center gap-2 text-sm text-fg-3">
-        <Play className="size-5 text-fg-3/60" />
-        Send this request to see the response here.
-      </span>,
-    );
-  if (out.state === "queued") return center(<span className="text-sm text-fg-3">Waiting for the earlier requests…</span>);
-  if (out.state === "skipped") return center(<span className="text-sm text-fg-3">Skipped because an earlier request didn't pass.</span>);
-  if ((out.state === "sending" || out.state === "polling") && !out.res)
-    return center(
-      <>
-        <StatusMark status="starting" size={14} className="text-warm" />
-        <span className="font-mono text-xs break-all text-fg-3">
-          {out.method} {out.url}
-        </span>
-        {out.state === "polling" && <span className="text-sm text-fg-2">Polling · try {out.tries}</span>}
-        <Button size="sm" onClick={onCancel}>
-          <Square /> Cancel
-        </Button>
-      </>,
-    );
-  if (out.state === "error" || (out.state === "cancelled" && !out.res)) {
-    const owner = out.missingService
-      ? (services.find((s) => s.name === out.missingService) ??
-        services.find((s) => s.id === serviceIdFor(doc.services.find((f) => f.alias === out.missingService)?.ref ?? "")))
-      : out.refusedPort
-        ? services.find((s) => (runtime[s.id]?.port ?? s.portHint) === out.refusedPort)
-        : undefined;
-    return center(
-      <>
-        <span className="max-w-[440px] text-sm text-bad-soft select-text">{out.error}</span>
-        {owner && runtime[owner.id]?.status !== "running" && (
-          <Button size="sm" variant="primary" onClick={() => void startService(owner.id)}>
-            <Play /> Start {owner.name}
-          </Button>
-        )}
-        <span className="font-mono text-xs break-all text-fg-3">
-          {out.method} {out.url}
-        </span>
-      </>,
-    );
-  }
-
-  const r = out.res!;
-  const failedChecks = out.checks.filter((c) => !c.ok);
-  const badHop = out.trace?.hops.some((h) => !h.ok);
-  return (
-    <div className="flex min-w-0 flex-col">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pt-3 pb-2">
-        <span className={cx("rounded px-2 py-0.5 font-mono text-sm font-semibold", r.status < 400 ? "bg-ok/15 text-ok" : "bg-bad/15 text-bad")}>
-          {r.status} {r.statusText}
-        </span>
-        <span className="font-mono text-sm text-fg-2" title={`First byte after ${formatMs(r.firstByteMs)}`}>
-          {formatMs(r.totalMs)}
-        </span>
-        <span className="font-mono text-sm text-fg-3">{formatBytes(r.size)}</span>
-        {(out.tries ?? 0) > 1 && <span className="font-mono text-sm text-fg-3">{out.tries} tries</span>}
-        <span className="flex-1" />
-        {out.state === "polling" && <span className="font-mono text-sm text-warm">polling · try {out.tries}</span>}
-        {out.checks.length > 0 && (
-          <span className={cx("text-sm", failedChecks.length ? "text-bad-soft" : "text-ok")}>
-            {out.checks.length - failedChecks.length}/{out.checks.length} checks
-          </span>
-        )}
-        {r.bodyText != null && (
-          <IconButton size="sm" label="Copy response body" onClick={() => void navigator.clipboard?.writeText(r.bodyText!)}>
-            <Copy />
-          </IconButton>
-        )}
-      </div>
-      {(out.extracted.length > 0 || failedChecks.length > 0) && (
-        <div className="flex flex-wrap gap-1.5 px-3 pb-2.5">
-          {out.extracted.map((e) => (
-            <span key={e.key} className="max-w-full truncate rounded bg-surface-3 px-1.5 font-mono text-xs text-fg" title={e.value}>
-              {`{{${e.key}}}`} = {e.value}
-            </span>
-          ))}
-          {failedChecks.map((c) => (
-            <span key={c.label} className="flex items-center gap-1 rounded bg-bad/10 px-1.5 font-mono text-xs text-bad-soft">
-              <X className="size-3" /> {c.label} · got {c.got}
-            </span>
-          ))}
-        </div>
-      )}
-      <Tabs
-        tabs={[
-          { id: "trace", label: "Trace", count: out.trace?.lines.length, dot: badHop },
-          { id: "body", label: "Response" },
-          { id: "headers", label: "Headers", count: r.headers.length },
-          { id: "request", label: "Request" },
-        ]}
-        value={tab}
-        onChange={setTab}
-      />
-      <div className="h-[340px] overflow-y-auto">
-        {tab === "trace" && <TraceView out={out} injected={doc.injectHeaders} />}
-        {tab === "body" && <ResponseBody out={out} />}
-        {tab === "headers" && <HeaderList rows={r.headers} />}
-        {tab === "request" && (
-          <div className="grid gap-3 px-4 py-3">
-            <div className="font-mono text-sm break-all text-fg select-text">
-              <span style={{ color: METHOD_COLOR[out.method] }}>{out.method}</span> {out.url}
-            </div>
-            <HeaderList rows={out.headers} bare />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-const MATCH_HELP = {
-  "request-id": "Auxin added this id to the request; services that log or forward it match exactly.",
-  value: "A value from the request or response (like a job id) found in other services' logs.",
-};
-
-function TraceView({ out, injected }: { out: StepOutcome; injected: boolean }) {
-  const [only, setOnly] = useState<string | null>(null);
-  const [showNearby, setShowNearby] = useState(false);
-  const services = useStore(selectServices);
-  const colorOf = (id: string) => SERVICE_COLORS[services.find((s) => s.id === id)?.color ?? 9];
-  if (out.tracing || !out.trace)
+  const lane = (key: "then" | "else" | "steps", steps: FlowStep[], label?: string, hint?: string) => {
+    const where: Lane = { block: block.id, lane: key };
+    const notTaken = !!taken && key !== "steps" && key !== taken;
     return (
-      <div className="grid h-full place-items-center p-6 text-center text-sm text-fg-3">
-        <span className="grid justify-items-center gap-2">
-          <StatusMark status="starting" size={12} className="text-warm" />
-          Collecting log lines from your services…
-        </span>
+      <div key={key}>
+        {label && (
+          <div className="flex h-8 items-center gap-2 border-b border-line bg-surface pl-10 text-xs">
+            <span className={cx("font-semibold tracking-wider uppercase", notTaken ? "text-fg-3" : "text-fg-2")}>{label}</span>
+            <span className="text-fg-3">{hint}</span>
+            {taken === key && (
+              <span className="flex items-center gap-1 text-ok">
+                <StatusMark status="running" size={8} /> taken
+              </span>
+            )}
+          </div>
+        )}
+        {/* The lane's rail: requests in it are indented and hang from a 1px hairline. */}
+        <div className="relative bg-surface pl-6 before:absolute before:inset-y-0 before:left-[14px] before:w-px before:bg-line-strong">
+          {steps.map((st) => stepRow(st, notTaken))}
+          <button
+            className="flex h-8 w-full items-center gap-1.5 border-b border-line bg-surface pl-10 text-sm text-fg-3 hover:bg-surface-2 hover:text-fg-2 disabled:pointer-events-none"
+            onClick={() => onAdd(where)}
+            onDragEnter={() => drag.dragId && onDropLane(where)}
+            onDragOver={(e) => e.preventDefault()}
+            disabled={drag.locked}
+          >
+            <Plus className="size-3.5" /> {steps.length ? "Add request" : key === "steps" ? "Add a request to send at the same time" : "Add a request, or drag one here"}
+          </button>
+        </div>
       </div>
     );
-  const t = out.trace;
-  const pick = (ls: TraceLine[]) => (only ? ls.filter((l) => l.service === only) : ls);
-  const lines = showNearby ? [...pick(t.lines), ...pick(t.nearby)].sort((a, b) => a.ts - b.ts) : pick(t.lines);
-  const t0 = Math.min(out.sentAt, lines[0]?.ts ?? out.sentAt);
-  const total = Math.max(1, ...t.hops.map((h) => h.ms));
+  };
 
   return (
-    <div>
-      {t.hops.length > 0 && (
-        <div className="grid gap-1 border-b border-line px-4 py-3">
-          {t.hops.map((h, i) => (
-            <button
-              key={h.service}
-              onClick={() => setOnly(only === h.service ? null : h.service)}
-              aria-pressed={only === h.service}
-              className={cx(
-                "grid grid-cols-[minmax(0,170px)_1fr_72px] items-center gap-3 rounded px-1 py-0.5 text-left text-sm transition-colors hover:bg-surface-2",
-                only === h.service && "bg-surface-2",
-              )}
-              title={only === h.service ? "Show every service" : "Show only this service's lines"}
-            >
-              <span className={cx("flex min-w-0 items-center gap-1.5", h.ok ? "text-fg" : "text-bad-soft")}>
-                {i > 0 && <ArrowRight className="size-3 flex-none text-fg-3" aria-hidden />}
-                <span className="h-3 w-[3px] flex-none rounded-full" style={{ background: colorOf(h.service) }} aria-hidden />
-                <span className="truncate">{h.alias}</span>
-              </span>
-              <span className="relative h-2 rounded-full bg-surface-3">
-                <span
-                  className="absolute inset-y-0 left-0 rounded-full"
-                  style={{ width: `${Math.max(2, (h.ms / total) * 100)}%`, background: h.ok ? colorOf(h.service) : "var(--color-bad)" }}
-                />
-              </span>
-              <span
-                className={cx("text-right font-mono text-xs", h.ok ? "text-fg-3" : "text-bad-soft")}
-                title={h.approx ? "From the first to the last matching log line (approximate)" : "Measured response time"}
-              >
-                {h.approx ? "≈" : ""}
-                {formatMs(h.ms)}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-      {lines.length ? (
-        <div className="py-1.5 font-mono text-sm leading-[18px] select-text">
-          {lines.map((l, i) => (
-            <div
-              key={i}
-              className={cx("flex gap-3 px-4", l.level === "error" && "bg-bad/[0.08]", l.level === "warn" && "bg-warm/[0.06]", l.tier === 3 && "opacity-55")}
-            >
-              <span className="w-16 flex-none text-right text-fg-3/80 tabular-nums" title={formatClock(l.ts)}>
-                +{l.ts - t0}ms
-              </span>
-              <span className="w-28 flex-none truncate font-semibold" style={{ color: colorOf(l.service) }} title={l.alias}>
-                {l.alias}
-              </span>
-              <span
-                className={cx(
-                  "min-w-0 break-all whitespace-pre-wrap",
-                  l.level === "error" ? "text-bad-soft" : l.level === "warn" ? "text-[#e9c98f]" : "text-fg",
-                )}
-              >
-                {highlight(l.text, l.match)}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="px-4 py-4 text-sm text-fg-3">
-          No log lines matched this request.{" "}
-          {injected
-            ? "Services that log the X-Request-ID header, or ids from the request and response, show up here."
-            : "Trace headers are off for this flow, so only ids from the request and response can match."}
-          {t.nearby.length > 0 && " Try “Show nearby lines”."}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-1.5 border-t border-line px-4 py-2 text-xs text-fg-3">
-        {t.matchedBy.length ? "Matched by" : "Nothing matched"}
-        {t.matchedBy.map((m) => (
-          <span key={m.label} className="max-w-60 truncate rounded bg-surface-3 px-1.5 font-mono text-fg-2" title={MATCH_HELP[m.kind]}>
-            {m.label}
-          </span>
-        ))}
-        <span className="flex-1" />
-        {t.nearby.length > 0 && (
-          <button className="text-fg-2 hover:text-fg" onClick={() => setShowNearby((v) => !v)} aria-pressed={showNearby}>
-            {showNearby ? "Hide" : "Show"} nearby lines ({t.nearby.length})
-          </button>
-        )}
-      </div>
-      {t.unavailable.length > 0 && (
-        <p className="px-4 pb-3 text-xs text-fg-3">
-          Logs not available for {t.unavailable.join(", ")}: start {t.unavailable.length > 1 ? "them" : "it"} from Auxin to trace through{" "}
-          {t.unavailable.length > 1 ? "them" : "it"}.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function highlight(text: string, needle?: string): ReactNode {
-  if (!needle) return text;
-  const i = text.indexOf(needle);
-  if (i < 0) return text;
-  return (
-    <>
-      {text.slice(0, i)}
-      <mark>{needle}</mark>
-      {text.slice(i + needle.length)}
-    </>
-  );
-}
-
-function HeaderList({ rows, bare }: { rows: [string, string][]; bare?: boolean }) {
-  return (
-    <div className={cx("grid gap-1 font-mono text-sm", !bare && "px-4 py-3")}>
-      {rows.map(([k, v], i) => (
-        <div key={k + i} className="flex gap-3">
-          <span className="w-44 flex-none truncate text-fg-3">{k}</span>
-          <span className="min-w-0 break-all text-fg select-text">{v}</span>
-        </div>
-      ))}
-      {!rows.length && <span className="text-fg-3">No headers.</span>}
-    </div>
-  );
-}
-
-function ResponseBody({ out }: { out: StepOutcome }) {
-  const r = out.res!;
-  const type = (r.contentType ?? "").toLowerCase();
-  const pretty = useMemo(() => {
-    if (r.bodyText == null) return null;
-    const t = r.bodyText.trim();
-    if (type.includes("json") || /^[[{]/.test(t)) {
-      try {
-        return JSON.stringify(JSON.parse(t), null, 2);
-      } catch {
-        return null;
-      }
-    }
-    return null;
-  }, [r.bodyText, type]);
-
-  return (
-    <div>
-      {r.truncated && (
-        <div className="flex items-center gap-2 border-b border-line bg-warm/10 px-4 py-2 text-xs text-fg-2">
-          Showing the first 10 MB of {formatBytes(r.size)}.
-          {r.fullBodyPath && (
-            <button className="underline underline-offset-2 hover:text-fg" onClick={() => void revealItemInDir(r.fullBodyPath!)}>
-              Show full response in Finder
-            </button>
+    <section
+      aria-label={isIf ? "If block" : "Parallel block"}
+      className={cx("border-b border-line last:border-b-0", drag.dragId === block.id && "opacity-50")}
+      onDragEnter={(e) => e.target === e.currentTarget && drag.dragTo(block.id)}
+      onDragOver={(e) => e.preventDefault()}
+    >
+      <div className="group flex h-11 items-center gap-3 bg-rail pr-2 pl-1" onDragEnter={() => drag.dragTo(block.id)}>
+        <Grip id={block.id} locked={drag.locked} onDragStart={drag.onDragStart} onDragEnd={drag.onDragEnd} />
+        <button
+          className="flex h-full min-w-0 flex-1 items-center gap-2.5 text-left disabled:cursor-default"
+          onClick={() => isIf && setEditing((v) => !v)}
+          disabled={!isIf}
+          aria-expanded={isIf ? editing : undefined}
+        >
+          {isIf ? <ChevronRight className={cx("size-3.5 flex-none text-fg-3 transition-transform", editing && "rotate-90")} /> : <span className="w-3.5 flex-none" />}
+          {isIf ? <Split className="size-4 flex-none rotate-90 text-fg-2" aria-hidden /> : <Rows3 className="size-4 flex-none text-fg-2" aria-hidden />}
+          <span className="flex-none text-xs font-semibold tracking-wider text-fg uppercase">{isIf ? "If" : "Parallel"}</span>
+          {isIf ? (
+            summary ? (
+              <span className="min-w-0 truncate font-mono text-xs text-fg-2">{summary}</span>
+            ) : (
+              <span className="text-sm text-fg-3">no condition yet</span>
+            )
+          ) : (
+            <span className="min-w-0 truncate text-sm text-fg-3">
+              {block.steps.length ? `${block.steps.length} request${block.steps.length === 1 ? "" : "s"} sent at the same time` : "requests here are sent at the same time"}
+            </span>
           )}
+          {isIf && <span className="flex-none text-xs text-fg-3">on the previous response</span>}
+        </button>
+        {issue && (
+          <span title={issue.message} className="flex-none">
+            <TriangleAlert className={cx("size-3.5", issue.level === "error" ? "text-bad-soft" : "text-warm")} aria-label={issue.message} />
+          </span>
+        )}
+        <IconButton label={isIf ? "Delete if block and its requests" : "Delete parallel block and its requests"} onClick={onRemove} disabled={drag.locked}>
+          <Trash2 />
+        </IconButton>
+      </div>
+      {isIf && editing && (
+        <div className="border-b border-line bg-bg px-10 py-3">
+          <ChecksEditor
+            checks={block.when}
+            onChange={(when) => updateFlow(path, (f) => ({ ...f, steps: f.steps.map((i) => (i.id === block.id && i.type === "if" ? { ...i, when } : i)) }))}
+            note="Then runs when every condition holds on the response of the request above; otherwise Else runs."
+            empty="Add a condition on the previous response, like status == 404."
+          />
         </div>
       )}
-      {pretty != null ? (
-        <pre className="px-4 py-3 font-mono text-sm leading-[18px] select-text">
-          <Json text={pretty} />
-        </pre>
-      ) : r.bodyText != null ? (
-        r.bodyText ? (
-          <pre className="px-4 py-3 font-mono text-sm leading-[18px] break-all whitespace-pre-wrap text-fg select-text">{r.bodyText}</pre>
-        ) : (
-          <p className="px-4 py-3 text-sm text-fg-3">Empty body.</p>
-        )
-      ) : type.startsWith("image/") && r.bodyBase64 ? (
-        <div className="p-4">
-          <img src={`data:${type};base64,${r.bodyBase64}`} alt="Response image" className="max-h-72 rounded border border-line" />
-        </div>
-      ) : (
-        <p className="px-4 py-3 text-sm text-fg-3">
-          Binary response ({r.contentType ?? "unknown type"}, {formatBytes(r.size)}).
-        </p>
-      )}
-    </div>
+      {isIf ? [lane("then", block.then, "Then", "when it matches"), lane("else", block.else, "Else", "otherwise")] : lane("steps", block.steps)}
+    </section>
   );
 }
 
@@ -1240,11 +548,12 @@ function AddRequest({ doc, onAdded }: { doc: FlowDoc; onAdded: (id: string) => v
     updateFlow(doc.path, (f) => ({ ...f, steps: [...f.steps, step] }));
     onAdded(step.id);
   };
+  const addBlock = (type: FlowBlock["type"]) => updateFlow(doc.path, (f) => ({ ...f, steps: [...f.steps, blankBlock(type)] }));
 
   const addFromCurl = async () => {
     if (!plan) return;
     if (Object.keys(plan.newSecrets).length) {
-      const env = envs[envName] ?? { name: envName, vars: {}, baseUrls: {}, insecureTls: false, secrets: {} };
+      const env = envs[envName] ?? { name: envName, vars: {}, baseUrls: {}, insecureTls: false, network: DEFAULT_NETWORK, secrets: {} };
       await saveEnv({ ...env, secrets: { ...env.secrets, ...plan.newSecrets } });
     }
     let kind: BodyKind = "none";
@@ -1267,7 +576,7 @@ function AddRequest({ doc, onAdded }: { doc: FlowDoc; onAdded: (id: string) => v
       .slice(-2)
       .join("/");
     add({
-      ...blankStep(doc.steps.length + 1, plan.url),
+      ...blankStep(allSteps(doc.steps).length + 1, plan.url),
       name: `${plan.method} ${last || "request"}`.slice(0, 40),
       method: plan.method,
       headers: plan.headers.map(([key, value]) => ({ key, value })),
@@ -1280,7 +589,7 @@ function AddRequest({ doc, onAdded }: { doc: FlowDoc; onAdded: (id: string) => v
   if (mode === "closed")
     return (
       <div className="mt-3 flex gap-2">
-        <Button onClick={() => add(blankStep(doc.steps.length + 1, ""))}>
+        <Button onClick={() => add(blankStep(allSteps(doc.steps).length + 1, ""))}>
           <Plus /> New request
         </Button>
         <Button
@@ -1290,6 +599,13 @@ function AddRequest({ doc, onAdded }: { doc: FlowDoc; onAdded: (id: string) => v
           }}
         >
           <ClipboardPaste /> Paste curl
+        </Button>
+        <span className="mx-1 w-px self-stretch bg-line" aria-hidden />
+        <Button variant="ghost" onClick={() => addBlock("if")} title="Run one of two lanes of requests, depending on the previous response">
+          <Split className="rotate-90" /> If block
+        </Button>
+        <Button variant="ghost" onClick={() => addBlock("parallel")} title="Send several requests at the same time">
+          <Rows3 /> Parallel block
         </Button>
       </div>
     );

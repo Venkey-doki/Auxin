@@ -1,6 +1,7 @@
 //! HTTP client for flows. Requests go out from Rust rather than the webview, so
 //! there is no CORS, headers like Origin/Cookie can be set, and timing is real.
 
+use crate::netpolicy::{Blocked, NetPolicy, Resolver};
 use base64::Engine as _;
 use reqwest::{cookie::Jar, redirect::Policy, Client, Method};
 use serde::{Deserialize, Serialize};
@@ -44,6 +45,9 @@ pub struct HttpRequest {
     /// Workspace root. A file body must resolve inside it.
     #[serde(default)]
     pub root: Option<String>,
+    /// Where this request may connect; enforced on every hop and resolved address.
+    #[serde(default)]
+    pub policy: NetPolicy,
 }
 
 fn default_timeout() -> u64 {
@@ -114,6 +118,14 @@ impl HttpState {
 /// A readable error that names only host:port: the full URL can carry a
 /// resolved secret (`?key=…`), and reqwest's own messages append it.
 fn friendly(e: reqwest::Error, url: &str) -> String {
+    // Policy refusals from the resolver or redirect policy arrive wrapped.
+    let mut src: Option<&dyn std::error::Error> = Some(&e);
+    while let Some(s) = src {
+        if let Some(b) = s.downcast_ref::<Blocked>() {
+            return b.to_string();
+        }
+        src = s.source();
+    }
     let h = reqwest::Url::parse(url)
         .ok()
         .map(|u| format!("{}:{}", u.host_str().unwrap_or("?"), u.port_or_known_default().unwrap_or(0)))
@@ -148,9 +160,26 @@ fn body_file(root: Option<&str>, rel: &str) -> Result<PathBuf, String> {
 
 async fn execute(state: &HttpState, req: HttpRequest, temp_dir: PathBuf) -> Result<HttpResponse, String> {
     let method = Method::from_str(&req.method.to_uppercase()).map_err(|_| format!("Unknown method {}", req.method))?;
+    // Unparseable URLs fall through to reqwest's own error below.
+    if let Ok(u) = reqwest::Url::parse(&req.url) {
+        req.policy.check_url(&u).map_err(|b| b.to_string())?;
+    }
+    // IP literals skip the resolver, so `check_url` covers them; hostnames are
+    // checked on the addresses they resolve to, which are the only ones dialed.
+    let policy = Arc::new(req.policy.clone());
+    let redirect = if req.follow_redirects {
+        let (p, limit) = (policy.clone(), Policy::limited(10));
+        Policy::custom(move |a| match p.check_url(a.url()) {
+            Ok(()) => limit.redirect(a),
+            Err(b) => a.error(b),
+        })
+    } else {
+        Policy::none()
+    };
     let mut builder = Client::builder()
         .timeout(Duration::from_millis(req.timeout_ms.max(1)))
-        .redirect(if req.follow_redirects { Policy::limited(10) } else { Policy::none() })
+        .redirect(redirect)
+        .dns_resolver(Arc::new(Resolver(policy)))
         .danger_accept_invalid_certs(req.insecure_tls);
     if let Some(j) = &req.cookie_jar {
         builder = builder.cookie_provider(state.jar(j));
@@ -262,6 +291,7 @@ mod tests {
             insecure_tls: false,
             cookie_jar: None,
             root: None,
+            policy: NetPolicy::default(),
         }
     }
 
@@ -351,6 +381,57 @@ mod tests {
         let res = rt().block_on(state.send(r, std::env::temp_dir())).unwrap();
         assert_eq!(res.status, 204);
         assert!(server.join().unwrap().ends_with(r#"{"region":"eu-west"}"#));
+    }
+
+    fn no_private(env: &str) -> NetPolicy {
+        NetPolicy { allow_private: false, allow_hosts: Vec::new(), env: env.into() }
+    }
+
+    #[test]
+    fn private_targets_follow_the_policy() {
+        let state = Arc::new(HttpState::default());
+        for url in ["http://127.0.0.1:9/x?key=SECRET123", "http://localhost:9/", "http://10.0.0.5/"] {
+            let mut r = req(url.into(), "GET", HttpBody::None);
+            r.policy = no_private("staging");
+            let err = rt().block_on(state.clone().send(r, std::env::temp_dir())).unwrap_err();
+            assert!(err.starts_with("Blocked by the network rules of “staging”: ") && err.contains("is a private address"), "{err}");
+            assert!(!err.contains("SECRET123"), "{err}");
+        }
+        let mut r = req("http://169.254.169.254/latest/meta-data/".into(), "GET", HttpBody::None);
+        r.policy.env = "dev".into();
+        let err = rt().block_on(state.send(r, std::env::temp_dir())).unwrap_err();
+        assert_eq!(err, "Blocked by the network rules of “dev”: 169.254.169.254 is a cloud metadata address.");
+    }
+
+    #[test]
+    fn non_http_scheme_is_refused() {
+        let state = Arc::new(HttpState::default());
+        let err = rt().block_on(state.send(req("file:///etc/passwd".into(), "GET", HttpBody::None), std::env::temp_dir())).unwrap_err();
+        assert_eq!(err, "Blocked by the network rules: file URLs aren't allowed, only http and https.");
+    }
+
+    #[test]
+    fn redirect_to_metadata_is_blocked() {
+        let (url, server) = serve_once("HTTP/1.1 302 Found\r\nlocation: http://169.254.169.254/latest/meta-data/\r\ncontent-length: 0\r\n\r\n", 0);
+        let state = Arc::new(HttpState::default());
+        let err = rt().block_on(state.send(req(format!("{url}/login"), "GET", HttpBody::None), std::env::temp_dir())).unwrap_err();
+        server.join().unwrap();
+        assert_eq!(err, "Blocked by the network rules: 169.254.169.254 is a cloud metadata address.");
+    }
+
+    #[test]
+    fn resolver_refusal_reads_cleanly() {
+        // Bypasses the up-front check to exercise the resolver's error path through reqwest.
+        let client = Client::builder().dns_resolver(Arc::new(Resolver(Arc::new(no_private(""))))).build().unwrap();
+        let url = "http://localhost:9/x?key=SECRET123";
+        let err = friendly(rt().block_on(client.get(url).send()).unwrap_err(), url);
+        assert!(err.starts_with("Blocked by the network rules: localhost is a private address"), "{err}");
+    }
+
+    #[test]
+    fn policy_defaults_when_absent() {
+        let r: HttpRequest = serde_json::from_str(r#"{"id":"a","method":"GET","url":"http://x","body":{"kind":"none"},"cookieJar":null}"#).unwrap();
+        assert!(r.policy.allow_private && r.policy.allow_hosts.is_empty());
     }
 
     #[test]

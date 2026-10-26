@@ -6,9 +6,9 @@
 import { api, type HttpResponse } from "../lib/api";
 import { getLogs } from "../state/logs";
 import { selectServices, toast, useStore } from "../state/store";
-import { mask, prepareRequest, runHttpStep, runSequence } from "./engine";
+import { mask, prepareRequest, redactBody, redactHeaders, runHttpStep, runItems, validateFlow, type Issue } from "./engine";
 import type { CheckResult } from "./eval";
-import { slugify, type Direction, type FlowDoc, type FlowStep, type KV } from "./model";
+import { allSteps, DEFAULT_NETWORK, parseFlow, serializeFlow, slugify, type Direction, type FlowDoc, type FlowStep, type KV } from "./model";
 import { activeEnvName, rk, serviceIdFor, servicePorts, updateFlow, useFlows, varSources, write } from "./store";
 import { computeTrace, correlationValues, isCorrelationValue, type TraceResult, type TraceService } from "./trace";
 
@@ -24,6 +24,9 @@ export interface StepOutcome {
   url: string;
   headers: [string, string][];
   tries?: number;
+  /** Attempts under the request's retry rule, and the one about to be sent while waiting. */
+  attempts?: number;
+  retrying?: { attempt: number; of: number };
   res?: HttpResponse;
   error?: string;
   /** Port of the target when the connection failed, to offer starting its service. */
@@ -42,6 +45,10 @@ export interface StepOutcome {
 export interface FlowRunState {
   runId: string;
   status: "running" | "passed" | "failed" | "cancelled";
+  /** The lane each if block took in this run. */
+  branches?: Record<string, "then" | "else">;
+  /** The run this one replays. */
+  replayOf?: string;
   startedAt: number;
   finishedAt?: number;
   env: string;
@@ -91,36 +98,37 @@ async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<
   if (req.missing.length) {
     const missing = req.missing;
     const names = missing.map((m) => `{{${m}}}`).join(", ");
-    const services = selectServices(useStore.getState());
-    const svcName = missing.find((m) => services.some((x) => x.name === m) || doc.services.some((f) => f.alias === m));
-    const svc = svcName && (services.find((x) => x.name === svcName) ?? services.find((x) => x.id === serviceIdFor(doc.services.find((f) => f.alias === svcName)!.ref)));
-    const earlier = missing.filter((m) => doc.steps.some((st) => st.extract.some((e) => e.key === m)));
+    const svc = missing.map((m) => serviceWithoutPort(doc, m)).find(Boolean);
+    const earlier = missing.filter((m) => allSteps(doc.steps).some((st) => st.extract.some((e) => e.key === m)));
     const error = svc
-      ? `Not sent: Auxin doesn't know ${svc.name}'s port yet. Start it once and its port is remembered, or set its URL under Environment.`
+      ? `Not sent: ${portUnknown(svc)}`
       : earlier.length
         ? `Not sent: ${earlier.map((m) => `{{${m}}}`).join(", ")} comes from an earlier request. Send that one first, or press Run flow.`
         : `Not sent: ${names} ${missing.length > 1 ? "have" : "has"} no value in “${activeEnvName()}”. Add ${missing.length > 1 ? "them" : "it"} under Environment.`;
-    const o: StepOutcome = { ...base, state: "error", finishedAt: Date.now(), error, missingService: svc ? svc.name : undefined };
+    const o: StepOutcome = { ...base, state: "error", finishedAt: Date.now(), error, missingService: svc };
     setOutcome(key, o);
     return o;
   }
 
   setOutcome(key, base);
+  const envName = activeEnvName();
+  const env = get().envs[envName];
   const result = await runHttpStep(
     step,
     req,
-    { reqId, jar: ctx.jar, insecureTls: get().envs[activeEnvName()]?.insecureTls ?? false, root: get().root },
+    { reqId, jar: ctx.jar, insecureTls: env?.insecureTls ?? false, root: get().root, policy: { ...(env?.network ?? DEFAULT_NETWORK), env: envName } },
     {
       send: api.httpSend,
       cancelled: ctx.cancelled,
       sleep,
       onPoll: ({ tries, res }) => patchOutcome(key, reqId, res ? { res, tries } : { state: "polling", tries }),
+      onRetry: ({ attempt, of, last }) => patchOutcome(key, reqId, { state: "sending", retrying: { attempt, of }, res: last.res, error: last.error ? mask(last.error, req.usedSecrets, src) : undefined }),
       onInflight: ctx.onInflight,
     },
   );
 
   const current = get().responses[key]?.reqId === reqId ? get().responses[key] : base;
-  const o: StepOutcome = { ...current, ...result, finishedAt: Date.now() };
+  const o: StepOutcome = { ...current, ...result, retrying: undefined, finishedAt: Date.now() };
   // Error text can echo the URL (and any secret resolved into it).
   if (o.error) o.error = mask(o.error, req.usedSecrets, src);
   if (o.state !== "cancelled" && (o.res || o.state === "error")) o.tracing = !!o.res;
@@ -128,6 +136,27 @@ async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<
   // Only secrets this request used, and long enough to be distinctive.
   if (o.res) scheduleTrace(doc, step, o, req.bodyText, req.usedSecrets.map((n) => src.secrets[n]).filter((v) => v && v.length >= 4));
   return o;
+}
+
+/** The service a `{{name}}` refers to when it has no URL because its port isn't known yet. */
+function serviceWithoutPort(doc: FlowDoc, name: string): string | undefined {
+  const services = selectServices(useStore.getState());
+  const ref = doc.services.find((f) => f.alias === name)?.ref;
+  return (services.find((x) => x.name === name) ?? (ref ? services.find((x) => x.id === serviceIdFor(ref)) : undefined))?.name;
+}
+
+const portUnknown = (svc: string) => `Auxin doesn't know ${svc}'s port yet. Start it once and its port is remembered, or set its URL under Environment.`;
+
+/** What would stop this flow from running, checked without sending anything. */
+export function flowIssues(doc: FlowDoc): Issue[] {
+  return validateFlow(doc.steps, {
+    src: varSources(doc, {}),
+    envName: activeEnvName(),
+    explain: (name) => {
+      const svc = serviceWithoutPort(doc, name);
+      return svc ? portUnknown(svc) : undefined;
+    },
+  });
 }
 
 /* ---------- tracing ---------- */
@@ -244,61 +273,85 @@ export function isRunning(path: string): boolean {
   return get().runs[path]?.status === "running";
 }
 
-export async function runFlow(path: string) {
-  const doc = get().flows[path];
+export async function runFlow(path: string, replay?: RunRecord) {
+  const current = get().flows[path];
+  // A replay runs the flow as it was saved in that run.
+  const doc = replay?.snapshot ? parseFlow(path, JSON.stringify(replay.snapshot)) : current;
   if (!doc || !doc.steps.length || isRunning(path)) return;
+  const steps = allSteps(doc.steps);
   // A single send still in flight would overwrite its step's result mid-run.
-  if (doc.steps.some((st) => isBusy(path, st.id))) {
+  if (steps.some((st) => isBusy(path, st.id))) {
     toast("info", "A request in this flow is still sending", "Wait for it, or cancel it, then run the flow.");
+    return;
+  }
+  const errors = flowIssues(doc).filter((i) => i.level === "error");
+  if (errors.length) {
+    toast("error", errors.length === 1 ? "Fix this before running the flow" : `Fix ${errors.length} problems before running the flow`, errors[0].message);
     return;
   }
   const runId = newId();
   const env = activeEnvName();
   const startedAt = Date.now();
   let cancelled = false;
-  let current: string | null = null;
+  const inflightIds = new Set<string>();
   runCancel.set(path, () => {
     cancelled = true;
-    if (current) void api.httpCancel(current);
+    inflightIds.forEach((id) => void api.httpCancel(id));
   });
   set((s) => ({
-    runs: { ...s.runs, [path]: { runId, status: "running", startedAt, env } },
-    responses: { ...s.responses, ...Object.fromEntries(doc.steps.map((st) => [rk(path, st.id), { state: "queued", reqId: `${runId}-q`, sentAt: startedAt, method: st.method, url: st.url, headers: [], checks: [], extracted: [] } as StepOutcome])) },
+    runs: { ...s.runs, [path]: { runId, status: "running", startedAt, env, branches: {}, replayOf: replay?.runId } },
+    responses: { ...s.responses, ...Object.fromEntries(steps.map((st) => [rk(path, st.id), { state: "queued", reqId: `${runId}-q`, sentAt: startedAt, method: st.method, url: st.url, headers: [], checks: [], extracted: [] } as StepOutcome])) },
   }));
 
   const stopSampler = startConnectionSampler(path);
   const jar = `run:${runId}`;
   const extra: Record<string, string> = {};
-  const { outcomes, status } = await runSequence(
-    doc.steps,
-    async (step) => {
-      const latest = get().flows[path]?.steps.find((s) => s.id === step.id) ?? step;
-      const o = await execute(get().flows[path] ?? doc, latest, { extra, jar, cancelled: () => cancelled, onInflight: (id) => (current = id) });
+  const { outcomes, branches, status } = await runItems<StepOutcome>(doc.steps, {
+    run: async (step) => {
+      // Edits made while running apply to requests not sent yet (not in a replay).
+      const latest = (!replay && allSteps(get().flows[path]?.steps ?? []).find((s) => s.id === step.id)) || step;
+      let mine: string | null = null;
+      const o = await execute(replay ? doc : (get().flows[path] ?? doc), latest, {
+        extra,
+        jar,
+        cancelled: () => cancelled,
+        onInflight: (id) => {
+          if (mine) inflightIds.delete(mine);
+          mine = id;
+          if (id) inflightIds.add(id);
+        },
+      });
       for (const e of o.extracted) extra[e.key] = e.value;
       return o;
     },
-    (step, why) => {
+    notRun: (step, why) => {
       const o: StepOutcome = { ...get().responses[rk(path, step.id)], state: why };
       setOutcome(rk(path, step.id), o);
       return o;
     },
-    () => cancelled,
-  );
+    isCancelled: () => cancelled,
+  });
   stopSampler();
   runCancel.delete(path);
   void api.httpDropJar(jar).catch(() => undefined);
 
-  set((s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], status, finishedAt: Date.now() } }, extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...extra } } }));
+  set((s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], status, branches, finishedAt: Date.now() } }, extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...extra } } }));
 
   // History includes each step's trace summary, so wait for the traces; then
   // use this run's own outcomes (a send made meanwhile must not leak in).
-  await Promise.all(outcomes.map((o) => pendingTraces.get(o.reqId)).filter(Boolean));
-  const final = outcomes.map((o, i) => {
-    const latest = get().responses[rk(path, doc.steps[i].id)];
-    return latest?.reqId === o.reqId ? latest : o;
+  await Promise.all([...outcomes.values()].map((o) => pendingTraces.get(o.reqId)).filter(Boolean));
+  const final = steps.map((st) => {
+    const o = outcomes.get(st.id);
+    const latest = get().responses[rk(path, st.id)];
+    return o && latest?.reqId === o.reqId ? latest : o;
   });
-  await saveHistory(path, doc.steps, runId, env, startedAt, status, final);
+  await saveHistory(path, doc, runId, env, startedAt, status, final, branches, replay?.runId);
   set((s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], historySavedAt: Date.now() } } }));
+}
+
+/** Runs the flow as it was saved in `rec`, with the current environment. */
+export function replayRun(path: string, rec: RunRecord) {
+  return runFlow(path, rec);
 }
 
 export function cancelRun(path: string) {
@@ -307,14 +360,26 @@ export function cancelRun(path: string) {
 
 /* ---------- run history (§2: .auxin/runs/<flow>/, last 30) ---------- */
 
+export interface RecordedMessage {
+  headers: [string, string][];
+  /** Redacted and capped (engine `redactBody`). */
+  body?: string;
+  truncated?: boolean;
+}
+
 export interface RunRecord {
-  version: 1;
+  version: 1 | 2;
   flow: string;
   runId: string;
+  /** The run this one replayed. */
+  replayOf?: string;
   env: string;
   startedAt: string;
   finishedAt: string;
   status: FlowRunState["status"];
+  /** The flow file as it was when the run started; what Replay runs. Version 2 records only. */
+  snapshot?: unknown;
+  branches?: Record<string, "then" | "else">;
   steps: {
     id: string;
     name: string;
@@ -324,31 +389,43 @@ export interface RunRecord {
     status?: number;
     ms?: number;
     tries?: number;
+    attempts?: number;
     error?: string;
     checks: CheckResult[];
     extracted: string[];
     hops: { alias: string; ms: number; ok: boolean }[];
+    request?: RecordedMessage;
+    response?: RecordedMessage & { status: number };
   }[];
 }
 
 const KEEP_RUNS = 30;
 const runsDir = (path: string) => `runs/${slugify(path.replace(/^flows\//, "").replace(/\.flow\.json$/, ""))}`;
 
-/** `steps` is the order the run used, so a mid-run reorder can't misalign outcomes. */
-async function saveHistory(path: string, steps: FlowStep[], runId: string, env: string, startedAt: number, status: FlowRunState["status"], outcomes: (StepOutcome | undefined)[]) {
+/**
+ * `doc` is the flow the run used, so a mid-run edit can't misalign outcomes;
+ * `outcomes` follows `allSteps(doc.steps)`. Bodies are kept redacted: secret
+ * values and token-like JSON fields are hidden, and each body is capped.
+ */
+async function saveHistory(path: string, doc: FlowDoc, runId: string, env: string, startedAt: number, status: FlowRunState["status"], outcomes: (StepOutcome | undefined)[], branches: Record<string, "then" | "else">, replayOf?: string) {
   const root = get().root;
-  const doc = get().flows[path];
-  if (!root || !doc) return;
+  if (!root) return;
+  const secrets = Object.values(get().envs[env]?.secrets ?? {});
   const rec: RunRecord = {
-    version: 1,
+    version: 2,
     flow: doc.name,
     runId,
+    ...(replayOf ? { replayOf } : {}),
     env,
     startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date().toISOString(),
     status,
-    steps: steps.map((st, i) => {
+    snapshot: JSON.parse(serializeFlow(doc).text),
+    branches,
+    steps: allSteps(doc.steps).map((st, i) => {
       const o = outcomes[i];
+      const reqBody = o?.res || o?.state === "error" ? redactBody(requestBodyText(st), secrets) : undefined;
+      const resBody = redactBody(o?.res?.bodyText, secrets);
       return {
         id: st.id,
         name: st.name,
@@ -358,12 +435,15 @@ async function saveHistory(path: string, steps: FlowStep[], runId: string, env: 
         status: o?.res?.status,
         ms: o?.res?.totalMs,
         tries: o?.tries,
+        attempts: o?.attempts,
         error: o?.error,
         // Only status/time readings are kept; other "got" values can be tokens.
         checks: (o?.checks ?? []).map((c) => ({ label: c.label, ok: c.ok, got: /^(status|time)\b/.test(c.label) ? c.got : "" })),
         // Names only: values can be tokens returned by a login call.
         extracted: (o?.extracted ?? []).map((e) => e.key),
         hops: (o?.trace?.hops ?? []).map((h) => ({ alias: h.alias, ms: h.ms, ok: h.ok })),
+        ...(o && o.state !== "queued" && o.state !== "skipped" && o.state !== "cancelled" ? { request: { headers: redactHeaders(o.headers, secrets), ...(reqBody ? { body: reqBody.body, truncated: reqBody.truncated } : {}) } } : {}),
+        ...(o?.res ? { response: { status: o.res.status, headers: redactHeaders(o.res.headers, secrets), ...(resBody ? { body: resBody.body, truncated: resBody.truncated || o.res.truncated } : {}) } } : {}),
       };
     }),
   };
@@ -388,6 +468,14 @@ export async function loadHistory(path: string): Promise<RunRecord[]> {
   } catch {
     return [];
   }
+}
+
+/** The request body as written in the flow (variables unresolved, so no secret values). */
+function requestBodyText(st: FlowStep): string | undefined {
+  if (st.body.kind === "json" || st.body.kind === "text") return st.body.text;
+  if (st.body.kind === "form") return st.body.form.map((f) => `${f.key}=${f.value}`).join("&");
+  if (st.body.kind === "file") return `@${st.body.file}`;
+  return undefined;
 }
 
 /* ---------- connection sampling during runs (§4.4) ---------- */

@@ -27,10 +27,11 @@ vi.mock("../lib/api", () => ({
   },
 }));
 
+import { api } from "../lib/api";
 import { appendLogs } from "../state/logs";
 import { useStore } from "../state/store";
-import { blankStep, newFlow, parseEnv, type FlowDoc, type FlowStep } from "./model";
-import { cancelRun, cancelStep, runFlow, sendStep } from "./runner";
+import { blankBlock, blankStep, isStep, newFlow, parseEnv, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
+import { cancelRun, cancelStep, replayRun, runFlow, sendStep } from "./runner";
 import { rk, saveEnv, syncWorkspace, updateFlow, useFlows } from "./store";
 
 const ROOT = "/w";
@@ -40,7 +41,7 @@ const res = (status: number, body: unknown, extra: Partial<HttpResponse> = {}): 
 };
 const step = (p: Partial<FlowStep>): FlowStep => ({ ...blankStep(1), ...p });
 
-function setup(steps: FlowStep[], opts: Partial<FlowDoc> = {}) {
+function setup(steps: FlowItem[], opts: Partial<FlowDoc> = {}) {
   const doc: FlowDoc = { ...newFlow("flows/e2e.flow.json", "E2E"), graceMs: 0, steps, ...opts };
   useStore.setState({
     config: { version: 1, activeWorkspaceId: "w", workspaces: [{ id: "w", root: ROOT, name: "w", overrides: {}, manual: [], hidden: [], groups: [] }] },
@@ -186,11 +187,11 @@ describe("sendStep", () => {
   it("explains a value that comes from an earlier request, and uses it once that request was sent", async () => {
     http.handler = async (r) => (r.url.endsWith("/a") ? res(200, { id: "abc12345" }) : res(200, {}));
     const doc = setup([step({ id: "a", url: "{{gw}}/a", extract: [{ key: "jobId", value: "body.id" }] }), step({ id: "b", url: "{{gw}}/b/{{jobId}}" })]);
-    await sendStep(doc.path, doc.steps[1]);
+    await sendStep(doc.path, doc.steps.filter(isStep)[1]);
     expect(out("b")).toMatchObject({ state: "error", error: expect.stringContaining("comes from an earlier request") });
     expect(http.sent).toHaveLength(0);
-    await sendStep(doc.path, doc.steps[0]);
-    await sendStep(doc.path, doc.steps[1]);
+    await sendStep(doc.path, doc.steps.filter(isStep)[0]);
+    await sendStep(doc.path, doc.steps.filter(isStep)[1]);
     expect(http.sent[http.sent.length - 1].url).toBe("http://localhost:4000/b/abc12345");
   });
 });
@@ -226,12 +227,12 @@ describe("review regressions", () => {
     const doc = setup([step({ id: "a", url: "{{gw}}/a" }), step({ id: "b", url: "{{gw}}/b" })]);
     const p = runFlow(doc.path);
     await sleep(10);
-    await sendStep(doc.path, doc.steps[0]); // ignored: the flow is running
+    await sendStep(doc.path, doc.steps.filter(isStep)[0]); // ignored: the flow is running
     cancelStep(doc.path, "a"); // routes to the run
     await p;
     expect(useFlows.getState().runs[doc.path].status).toBe("cancelled");
     expect(n).toBe(1);
-    await sendStep(doc.path, doc.steps[0]);
+    await sendStep(doc.path, doc.steps.filter(isStep)[0]);
     expect(out("a").state).toBe("passed");
   });
 
@@ -241,7 +242,7 @@ describe("review regressions", () => {
     const doc = setup([step({ id: "a", url: "{{gw}}/a" })], { graceMs: 80 });
     const p = runFlow(doc.path);
     await sleep(40);
-    await sendStep(doc.path, doc.steps[0]); // run has finished its requests; this one returns 500
+    await sendStep(doc.path, doc.steps.filter(isStep)[0]); // run has finished its requests; this one returns 500
     await p;
     const rec = JSON.parse(http.writes.find(([q]) => q.startsWith("runs/"))![1]);
     expect(rec.status).toBe("passed");
@@ -298,5 +299,77 @@ describe("disk sync", () => {
     await saveEnv({ ...useFlows.getState().envs.local, secrets: {} });
     const w = http.writes.find(([p]) => p === "env/local.secret.json");
     expect(w && JSON.parse(w[1])).toEqual({ vars: {} });
+  });
+});
+
+describe("control flow, history and replay", () => {
+  const ifBlock = (p: Partial<IfBlock>): IfBlock => ({ ...(blankBlock("if") as IfBlock), ...p });
+  const parallel = (p: Partial<ParallelBlock>): ParallelBlock => ({ ...(blankBlock("parallel") as ParallelBlock), ...p });
+  const record = () => JSON.parse(http.writes.filter(([p]) => p.startsWith("runs/")).slice(-1)[0][1]);
+
+  it("won't start a run that validation rejects, and sends nothing", async () => {
+    http.handler = async () => res(200, {});
+    const doc = setup([step({ id: "a", url: "{{gw}}/x/{{nope}}" })]);
+    await runFlow(doc.path);
+    expect(http.sent).toHaveLength(0);
+    expect(useFlows.getState().runs[doc.path]).toBeUndefined();
+  });
+
+  it("takes an if lane, runs a parallel block, and records both in history", async () => {
+    http.handler = async (r) => (r.url.endsWith("/find") ? res(404, {}) : res(201, { token: "tok_live_123456" }));
+    const doc = setup([
+      step({ id: "find", url: "{{gw}}/find", onFailure: "continue" }),
+      ifBlock({ id: "if1", when: [{ left: "status", op: "==", right: "404" }], then: [step({ id: "create", method: "POST", url: "{{gw}}/create" })], else: [step({ id: "read", url: "{{gw}}/read" })] }),
+      parallel({ id: "p1", steps: [step({ id: "p", url: "{{gw}}/p" }), step({ id: "q", url: "{{gw}}/q" })] }),
+    ]);
+    await runFlow(doc.path);
+    expect(http.sent.map((r) => r.url.replace("http://localhost:4000", ""))).toEqual(["/find", "/create", "/p", "/q"]);
+    expect(out("read").state).toBe("skipped");
+    const run = useFlows.getState().runs[doc.path];
+    expect(run.branches).toEqual({ if1: "then" });
+    // find failed (404) but continues, so the run is failed overall.
+    expect(run.status).toBe("failed");
+    const rec = record();
+    expect(rec).toMatchObject({ version: 2, branches: { if1: "then" }, snapshot: { version: 2, steps: [{ id: "find" }, { id: "if1", type: "if" }, { id: "p1", type: "parallel" }] } });
+    const created = rec.steps.find((s: { id: string }) => s.id === "create");
+    expect(created.response).toMatchObject({ status: 201 });
+    expect(created.response.body).toContain("••••••");
+    expect(JSON.stringify(rec)).not.toContain("tok_live");
+  });
+
+  it("sends the environment's network rules with every request", async () => {
+    http.handler = async () => res(200, {});
+    const doc = setup([step({ id: "a", url: "{{gw}}/x" })]);
+    useFlows.setState((s) => ({ envs: { local: { ...s.envs.local, network: { allowPrivate: false, allowHosts: ["*.example.com"] } } } }));
+    await runFlow(doc.path);
+    expect(http.sent[0].policy).toEqual({ allowPrivate: false, allowHosts: ["*.example.com"], env: "local" });
+  });
+
+  it("replays the flow as it was recorded, even after it was edited", async () => {
+    http.handler = async () => res(200, {});
+    const doc = setup([step({ id: "a", url: "{{gw}}/original" })]);
+    await runFlow(doc.path);
+    const rec = record();
+    updateFlow(doc.path, (f) => ({ ...f, steps: [step({ id: "a", url: "{{gw}}/edited" })] }));
+    http.sent = [];
+    await replayRun(doc.path, rec);
+    expect(http.sent.map((r) => r.url)).toEqual(["http://localhost:4000/original"]);
+    expect(record().replayOf).toBe(rec.runId);
+  });
+
+  it("Stop cancels every request a parallel block has in flight", async () => {
+    http.handler = async () => {
+      await sleep(200);
+      return res(200, {});
+    };
+    const cancel = vi.mocked(api.httpCancel);
+    cancel.mockClear();
+    const doc = setup([parallel({ id: "p1", steps: [step({ id: "p", url: "{{gw}}/p" }), step({ id: "q", url: "{{gw}}/q" })] })]);
+    const p = runFlow(doc.path);
+    await sleep(20);
+    cancelRun(doc.path);
+    await p;
+    expect(new Set(cancel.mock.calls.map(([id]) => id)).size).toBe(2);
+    expect(useFlows.getState().runs[doc.path].status).toBe("cancelled");
   });
 });

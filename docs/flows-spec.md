@@ -73,6 +73,24 @@ It must work for any project:
   - `{ "file": "relative/path" }`: relative to the workspace. A file outside it (absolute path, `..`, or a symlink out) is refused, because flow files can come from someone else's repo.
   - `null`
 - `headers` is an ordered object. Duplicate header names are not supported in v1.
+- A step can also have:
+  - `retry: { "max": 1–5, "backoffMs": 500, "on": "errors" | "any" }`: re-send after a pause that doubles each time (±20% jitter, capped at 30 s). `errors` covers no response (refused, timed out) and 5xx; `any` also covers failed checks and a poll that never matched.
+  - `onFailure: "continue"`: the flow keeps going after this step fails (the run is still marked failed). The default is to stop.
+
+**Blocks.** Besides requests, `steps` can hold two kinds of block. Blocks hold requests only, never other blocks.
+
+```json
+{ "id": "b1", "type": "if", "name": "If",
+  "when": [ { "left": "status", "op": "==", "right": 404 } ],
+  "then": [ /* requests */ ], "else": [ /* requests */ ] }
+{ "id": "b2", "type": "parallel", "name": "At the same time",
+  "steps": [ /* requests */ ] }
+```
+
+- `if` checks `when` (the same rows as checks) on the response of the request just before the block, and runs `then` when every condition holds, `else` otherwise. The lane not taken is marked "not taken".
+- `parallel` sends its requests at once, at most 4 in flight. Every request in it is sent even if one fails; the flow then stops (or continues, per `onFailure`) once all have finished. Requests in one parallel block can't use each other's extracted values.
+
+**Checked before a run.** Run refuses to start, and the flow shows a strip of problems, when a request has no URL, a `{{variable}}` has no value or is only extracted later (or by a request sent at the same time), a service's port isn't known yet, or an if block has no condition or no request before it. Variables extracted inside an if lane are a warning, since they may be empty.
 
 ### 2.2 Environment and secret files
 
@@ -85,6 +103,11 @@ It must work for any project:
 
 - `baseUrls` is optional. When a service has no entry, `{{alias}}` resolves to `http://localhost:<port>` from the service's detected or announced port (§4.1).
 - The environment picker in the top bar lists every file in `.auxin/env/`. `local` is created automatically.
+- `network: { "allowPrivate": true, "allowHosts": ["*.staging.example.com"] }` limits where the environment's requests may go. `allowPrivate` (default on) covers localhost and private addresses; a non-empty `allowHosts` limits public hosts to that list (exact, or `*.` for subdomains). Cloud metadata and link-local addresses are always blocked. The backend checks the resolved address it connects to and every redirect, so a name can't be pointed elsewhere after the check. When an `HTTP(S)_PROXY` environment variable is set, the proxy resolves names, so that last check applies only to IP addresses.
+
+### 2.3 Run history
+
+Each run is saved as a version 2 record: status and timing per request; the request and response headers and bodies (secret values and token-like JSON fields such as `accessToken` or `password` hidden; credential headers hidden; each body cut at 64 KB); the lane each if block took; and a snapshot of the flow file as it was. **Replay** in run history runs that snapshot again with the current environment and saves a new record linked to the old one by `replayOf`. Records from before this version have no snapshot and can't be replayed.
 
 ## 3. Variables, extraction, checks, polling
 
@@ -110,7 +133,7 @@ This is a deliberately small JSONPath subset. A non-JSON body is addressable onl
 - `exists`, `!exists`
 - `length ==`
 
-`right` is a JSON literal. If any check fails, the step fails and the remaining steps are marked *skipped*.
+`right` is a JSON literal. If any check fails, the step fails and the remaining steps are marked *skipped*, unless the step says `onFailure: "continue"`.
 
 **Poll:** `{ "until": <check or list of checks>, "everyMs": 1000, "maxTries": 30 }`.
 - Re-sends until the condition holds.
@@ -225,7 +248,8 @@ Requests are sent from **Rust**, not from the webview's `fetch`. That means:
   - size
   - timings: time to response headers ("first byte") and total. A DNS/connect/TLS breakdown would need a custom connector, so it's deferred.
 - **Large bodies:** responses over 10 MB are truncated in the UI with "Save full response…".
-- **Cancel:** `http_cancel(id)` aborts in-flight requests (Stop button).
+- **Cancel:** `step_cancel(id)` aborts an in-flight request; Stop cancels every request in flight, including all of a parallel block's.
+- **Network rules:** the environment's `network` (§2.2) is sent with each request and enforced in Rust (`netpolicy.rs`).
 - **Content types:** JSON is pretty-printed with syntax colour (prototype), with copy/collapse/search. Other types show as text. Images and PDFs show a preview, or "binary, N KB" with a save button.
 
 **curl:**

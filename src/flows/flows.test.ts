@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseCurl, toCurl } from "../lib/curl";
-import { blankStep, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow } from "./model";
+import { blankStep, isStep, newFlow, parseEnv, parseFlow, serializeEnv, serializeFlow } from "./model";
 import { resolve, resolveHidingSecrets, templatize, type VarSources } from "./vars";
 
 const USER_PATCH = `curl --request PATCH \\
@@ -88,11 +88,11 @@ describe("flow files", () => {
     });
     const doc = parseFlow("flows/e2e.flow.json", text);
     expect(doc.injectHeaders).toBe(false);
-    expect(doc.steps[0]).toMatchObject({ method: "POST", body: { kind: "json" }, extract: [{ key: "jobId", value: "body.jobId" }] });
-    expect(doc.steps[1].body).toMatchObject({ kind: "file", file: "payloads/a.json" });
+    expect(doc.steps.filter(isStep)[0]).toMatchObject({ method: "POST", body: { kind: "json" }, extract: [{ key: "jobId", value: "body.jobId" }] });
+    expect(doc.steps.filter(isStep)[1].body).toMatchObject({ kind: "file", file: "payloads/a.json" });
     const again = JSON.parse(serializeFlow(doc).text);
     expect(again.services).toEqual([{ ref: "gw", alias: "gw" }]);
-    expect(again.steps[0].extract).toEqual({ jobId: "body.jobId" });
+    expect(again.steps.filter(isStep)[0].extract).toEqual({ jobId: "body.jobId" });
     expect(again.steps[0].http.body).toEqual({ json: { n: 1 } });
     expect(again.trace).toEqual({ injectHeaders: false, graceMs: 900 });
   });
@@ -100,7 +100,7 @@ describe("flow files", () => {
   it("never writes invalid JSON bodies; keeps the last valid one", () => {
     const prev = newFlow("flows/x.flow.json", "X");
     prev.steps = [{ ...blankStep(1), id: "s", body: { kind: "json", text: '{"ok":true}', form: [], file: "" } }];
-    const edited = { ...prev, steps: [{ ...prev.steps[0], body: { ...prev.steps[0].body, text: '{"ok":' } }] };
+    const edited = { ...prev, steps: [{ ...prev.steps[0], body: { ...prev.steps.filter(isStep)[0].body, text: '{"ok":' } }] };
     const out = serializeFlow(edited, prev);
     expect(out.invalid).toEqual(["s"]);
     expect(JSON.parse(out.text).steps[0].http.body).toEqual({ json: { ok: true } });
@@ -111,7 +111,7 @@ describe("flow files", () => {
     f.steps = [{ ...blankStep(1), id: "s", body: { kind: "json", text: '{"count": {{n}}}', form: [], file: "" } }];
     const saved = serializeFlow(f).text;
     expect(JSON.parse(saved).steps[0].http.body).toEqual({ jsonText: '{"count": {{n}}}' });
-    expect(parseFlow("flows/v.flow.json", saved).steps[0].body).toMatchObject({ kind: "json", text: '{"count": {{n}}}' });
+    expect(parseFlow("flows/v.flow.json", saved).steps.filter(isStep)[0].body).toMatchObject({ kind: "json", text: '{"count": {{n}}}' });
   });
 
   it("empty JSON bodies and long integers survive a save and reload unchanged", () => {
@@ -122,10 +122,10 @@ describe("flow files", () => {
       { ...blankStep(3), id: "s", body: { kind: "json", text: '{"small": 42, "name": "1234567890123456789"}', form: [], file: "" } },
     ];
     const back = parseFlow("flows/j.flow.json", serializeFlow(f).text);
-    expect(back.steps[0].body).toMatchObject({ kind: "json", text: "" });
-    expect(back.steps[1].body.text).toBe('{"id": 1234567890123456789}');
+    expect(back.steps.filter(isStep)[0].body).toMatchObject({ kind: "json", text: "" });
+    expect(back.steps.filter(isStep)[1].body.text).toBe('{"id": 1234567890123456789}');
     const mixed = { ...f, steps: [{ ...blankStep(1), id: "m", body: { kind: "json" as const, text: '{"ref":"1111111111111111","id":12345678901234567890}', form: [], file: "" } }] };
-    expect(parseFlow("flows/j.flow.json", serializeFlow(mixed).text).steps[0].body.text).toContain("12345678901234567890");
+    expect(parseFlow("flows/j.flow.json", serializeFlow(mixed).text).steps.filter(isStep)[0].body.text).toContain("12345678901234567890");
     // Long digits inside a string are safe, so it's stored as parsed JSON.
     expect(JSON.parse(serializeFlow(f).text).steps[2].http.body).toEqual({ json: { small: 42, name: "1234567890123456789" } });
   });
@@ -138,7 +138,7 @@ describe("flow files", () => {
     });
     const out = JSON.parse(serializeFlow(parseFlow("flows/old.flow.json", v1)).text);
     expect(out.version).toBe(2);
-    expect(out.steps[0]).toEqual({
+    expect(out.steps.filter(isStep)[0]).toEqual({
       id: "a",
       type: "http",
       name: "Wait",
@@ -154,8 +154,8 @@ describe("flow files", () => {
     const f = newFlow("flows/v2.flow.json", "V2");
     f.steps = [{ ...blankStep(1), id: "s", method: "POST", url: "{{gw}}/x", body: { kind: "json", text: '{"a":1}', form: [], file: "" } }];
     const once = serializeFlow(f).text;
-    expect(JSON.parse(once).steps[0]).not.toHaveProperty("wait");
-    expect(JSON.parse(once).steps[0]).not.toHaveProperty("method");
+    expect(JSON.parse(once).steps.filter(isStep)[0]).not.toHaveProperty("wait");
+    expect(JSON.parse(once).steps.filter(isStep)[0]).not.toHaveProperty("method");
     expect(serializeFlow(parseFlow("flows/v2.flow.json", once)).text).toBe(once);
   });
 

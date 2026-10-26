@@ -1,6 +1,7 @@
 mod conns;
 mod deps;
 mod http;
+mod netpolicy;
 mod process;
 mod scan;
 mod steps;
