@@ -1,0 +1,6 @@
+# Commits that only reformat code. `git blame` and GitHub's blame view skip them,
+# so each line still shows the commit that really changed it.
+# Locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# chore: format the codebase with Prettier and rustfmt
+97a264afd9d25e4e33043bcbedc690d9fd7b8d2f
