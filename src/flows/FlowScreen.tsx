@@ -3,11 +3,12 @@
  * Linear-style rows that open into an Insomnia-style request | response split
  * with the request's trace. docs/flows-spec.md §7.
  */
-import { ChevronRight, ClipboardPaste, GripVertical, History, Inbox, Play, Plus, Rows3, Send, Settings2, Split, Square, Trash2, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, ClipboardPaste, GripVertical, History, Inbox, Play, Plus, Rows3, Send, Settings2, Split, Square, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { EditableTitle } from "../components/GroupView";
 import { StatusMark, STATUS_TEXT, type Shown } from "../components/status";
-import { Button, cx, IconButton, TopBar } from "../components/ui";
+import { Popover } from "../components/Popover";
+import { Button, cx, IconButton, MenuItem, MenuLabel, TopBar } from "../components/ui";
 import { parseCurl } from "../lib/curl";
 import { MOD } from "../lib/util";
 import { useStore } from "../state/store";
@@ -34,6 +35,9 @@ const readCanvasH = () => {
   }
 };
 
+/** The open request per flow (by workspace and path), kept while the app runs. */
+const openSteps = new Map<string, string | null>();
+
 export function FlowScreen({ path }: { path: string }) {
   const loaded = useFlows((s) => s.loaded);
   const doc = useFlows((s) => s.flows[path]);
@@ -42,19 +46,26 @@ export function FlowScreen({ path }: { path: string }) {
   const responses = useFlows((s) => s.responses);
   useStore((s) => s.config); // the chosen environment lives in the workspace config
   useStore((s) => s.runtime); // service ports feed {{service}} variables, and so the issues below
-  const [openId, setOpenId] = useState<string | null>(null);
+  const root = useFlows((s) => s.root);
+  const openKey = `${root}\u0000${path}`;
+  const [openId, setOpen] = useState<string | null>(() => openSteps.get(openKey) ?? null);
+  const setOpenId = (id: string | null) => {
+    openSteps.set(openKey, id);
+    setOpen(id);
+  };
+  // The screen stays mounted when you switch flows or workspaces; show what was open in this one.
+  useEffect(() => setOpen(openSteps.get(openKey) ?? null), [openKey]);
   const [panel, setPanel] = useState<"env" | "history" | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [canvasH, setCanvasH] = useState(readCanvasH);
   const steps = useMemo(() => (doc ? allSteps(doc.steps) : []), [doc]);
 
-  // Open the first request once, when the flow is first shown; after that rows stay as the user leaves them.
-  const autoOpened = useRef(false);
+  // Open the first request the first time a flow is shown; after that rows stay as the user leaves them,
+  // also when they come back to it from another flow or workspace.
   useEffect(() => {
-    if (autoOpened.current || !steps[0]) return;
-    autoOpened.current = true;
+    if (openSteps.has(openKey) || !steps[0]) return;
     setOpenId(steps[0].id);
-  }, [steps]);
+  }, [steps, openKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ⌘↵ sends the open request, ⌘⇧↵ runs the flow.
   useEffect(() => {
@@ -154,9 +165,12 @@ export function FlowScreen({ path }: { path: string }) {
             <Square /> Stop
           </Button>
         ) : (
-          <Button variant="primary" disabled={!steps.length} onClick={() => void runFlow(path)} title={`Run the flow (${MOD}⇧↵)`}>
-            <Play /> Run flow
-          </Button>
+          <>
+            <Button variant="primary" disabled={!steps.length} onClick={() => void runFlow(path)} title={`Run the flow in “${activeEnvName()}” (${MOD}⇧↵)`}>
+              <Play /> Run flow
+            </Button>
+            {Object.keys(envs).length > 1 && <RunInMenu path={path} envs={Object.keys(envs).filter((n) => n !== activeEnvName())} disabled={!steps.length} />}
+          </>
         )}
         <IconButton label="Delete flow" onClick={() => void confirmDeleteFlow(path)}>
           <Trash2 />
@@ -212,6 +226,33 @@ export function FlowScreen({ path }: { path: string }) {
   );
 }
 
+/** Runs the flow once in another environment, leaving the one picked in the top bar as it is. */
+function RunInMenu({ path, envs, disabled }: { path: string; envs: string[]; disabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <IconButton ref={anchor} label="Run in another environment" onClick={() => setOpen((v) => !v)} disabled={disabled} aria-expanded={open}>
+        <ChevronDown />
+      </IconButton>
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} align="end" width={220}>
+        <MenuLabel>Run once in</MenuLabel>
+        {envs.map((n) => (
+          <MenuItem
+            key={n}
+            onClick={() => {
+              setOpen(false);
+              void runFlow(path, { env: n });
+            }}
+          >
+            <Play className="size-3.5 text-fg-3" /> {n}
+          </MenuItem>
+        ))}
+      </Popover>
+    </>
+  );
+}
+
 function RunSummary({ doc }: { doc: FlowDoc }) {
   const run = useFlows((s) => s.runs[doc.path]);
   const responses = useFlows((s) => s.responses);
@@ -236,6 +277,7 @@ function RunSummary({ doc }: { doc: FlowDoc }) {
     <span className={cx("flex min-w-0 flex-none items-center gap-1.5 truncate text-sm", STATUS_TEXT[tone])}>
       <StatusMark status={tone} size={9} /> {text}
       {run.replayOf && <span className="text-fg-3">· replay</span>}
+      {run.env !== activeEnvName() && <span className="text-fg-3">· in {run.env}</span>}
     </span>
   );
 }

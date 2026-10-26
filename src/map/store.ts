@@ -7,7 +7,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { api } from "../lib/api";
 import { activeWorkspace, selectServices, toast, updateActiveWorkspace, useStore } from "../state/store";
-import { updateFlow, useFlows, write } from "../flows/store";
+import { updateFlow, useFlows, write, writeTo } from "../flows/store";
 import { emptyTopology, keepEdge, mergeTopology, removeEdge, parseTopology, serializeTopology, serviceKey, type Discovery, type Observation, type TopologyFile } from "./model";
 
 const TOPOLOGY = "topology.json";
@@ -30,9 +30,36 @@ let lastWritten: string | null = null;
 let saveTimer: number | undefined;
 let observedTimer: number | undefined;
 
+/** Maps of workspaces switched away from, so switching back doesn't scan again. */
+const parked = new Map<string, Pick<MapState, "file" | "observed" | "discovery">>();
+
+/** Writes waiting on a timer belong to the workspace being left: write them now, to it. */
+function flushTo(root: string) {
+  if (saveTimer !== undefined) {
+    window.clearTimeout(saveTimer);
+    saveTimer = undefined;
+    lastWritten = serializeTopology(get().file);
+    void writeTo(root, TOPOLOGY, lastWritten);
+  }
+  if (observedTimer !== undefined) {
+    window.clearTimeout(observedTimer);
+    observedTimer = undefined;
+    void writeTo(root, OBSERVED, JSON.stringify(get().observed, null, 2) + "\n");
+  }
+}
+
 /** Reads the map files for `root`; called by the flows store whenever `.auxin` is (re)loaded. */
 export async function loadTopology(root: string) {
-  if (get().root !== root) set({ root, file: emptyTopology(), observed: [], discovery: null });
+  const prev = get().root;
+  if (prev !== root) {
+    if (prev) {
+      flushTo(prev);
+      parked.set(prev, { file: get().file, observed: get().observed, discovery: get().discovery });
+    }
+    set({ root, file: emptyTopology(), observed: [], discovery: null, ...parked.get(root) });
+    parked.delete(root);
+    lastWritten = null;
+  }
   const read = (p: string) => api.auxinRead(root, p).catch(() => null);
   const [text, obs] = await Promise.all([read(TOPOLOGY), read(OBSERVED)]);
   if (get().root !== root) return;

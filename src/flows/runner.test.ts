@@ -32,9 +32,9 @@ import { api } from "../lib/api";
 import { useMap } from "../map/store";
 import { appendLogs } from "../state/logs";
 import { useStore } from "../state/store";
-import { blankBlock, blankQueueStep, blankStep, isStep, newFlow, parseEnv, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
+import { blankBlock, blankQueueStep, blankStep, isStep, newFlow, parseEnv, serializeFlow, type FlowDoc, type FlowItem, type FlowStep, type IfBlock, type ParallelBlock } from "./model";
 import { cancelRun, cancelStep, replayRun, runFlow, sendStep } from "./runner";
-import { rk, saveEnv, syncWorkspace, updateFlow, useFlows } from "./store";
+import { activeEnvName, rk, saveEnv, syncWorkspace, updateFlow, useFlows } from "./store";
 
 const ROOT = "/w";
 const res = (status: number, body: unknown, extra: Partial<HttpResponse> = {}): HttpResponse => {
@@ -456,5 +456,50 @@ describe("OpenTelemetry spans", () => {
     expect(out("a").spans).toHaveLength(2);
     expect(useMap.getState().observed).toEqual([expect.objectContaining({ from: "gw", to: "model", source: "otel" })]);
     useStore.setState({ otel: null });
+  });
+});
+
+describe("running in another environment", () => {
+  it("uses that environment's values and network rules, records it, and leaves the active one alone", async () => {
+    http.handler = async () => res(200, {});
+    const doc = setup([step({ id: "a", url: "{{gw}}/x/{{region}}" })]);
+    useFlows.setState((s) => ({
+      envs: { ...s.envs, staging: { ...parseEnv("staging"), vars: { region: "US" }, baseUrls: { gw: "https://staging.example.com" }, network: { allowPrivate: false, allowHosts: ["*.example.com"] } } },
+    }));
+    await runFlow(doc.path, { env: "staging" });
+    expect(http.sent[0].url).toBe("https://staging.example.com/x/US");
+    expect(http.sent[0].policy).toMatchObject({ env: "staging", allowPrivate: false });
+    expect(useFlows.getState().runs[doc.path].env).toBe("staging");
+    expect(JSON.parse(http.writes.find(([p]) => p.startsWith("runs/"))![1]).env).toBe("staging");
+    expect(activeEnvName()).toBe("local");
+  });
+});
+
+describe("switching workspaces", () => {
+  it("a run keeps going in its own workspace, and its results are there when you come back", async () => {
+    http.handler = async () => {
+      await sleep(80);
+      return res(200, {});
+    };
+    const doc = setup([step({ id: "a", url: "{{gw}}/slow" }), step({ id: "b", url: "{{gw}}/next" })]);
+    http.disk = [[doc.path, serializeFlow(doc).text]];
+    const write = vi.mocked(api.auxinWrite);
+    write.mockClear();
+    const p = runFlow(doc.path);
+    await sleep(20);
+    await syncWorkspace("/other");
+    // The other workspace starts clean: nothing of the first one's run shows there.
+    expect(useFlows.getState().root).toBe("/other");
+    expect(useFlows.getState().runs[doc.path]).toBeUndefined();
+    await p;
+    expect(http.sent).toHaveLength(2);
+    // History went to the workspace the run belongs to.
+    expect(write.mock.calls.filter(([, path]) => path.startsWith("runs/e2e/")).map(([root]) => root)).toEqual([ROOT]);
+    // Nothing of it was written into the other workspace.
+    expect(write.mock.calls.filter(([root]) => root === "/other")).toEqual([]);
+    await syncWorkspace(ROOT);
+    expect(useFlows.getState().runs[doc.path]).toMatchObject({ status: "passed" });
+    expect(out("a").state).toBe("passed");
+    expect(out("b").state).toBe("passed");
   });
 });

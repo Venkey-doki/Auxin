@@ -42,6 +42,30 @@ const pending = new Set<string>();
 /** Writes in flight per path, so an older write finishing doesn't clear `pending` early. */
 const inflightWrites = new Map<string, number>();
 
+/** What a workspace keeps while another is open: its flows, environments and results. */
+export type Slice = Pick<FlowsState, "flows" | "broken" | "envs" | "invalid" | "responses" | "runs" | "extracted">;
+const SLICE_KEYS = ["flows", "broken", "envs", "invalid", "responses", "runs", "extracted"] as const;
+const emptySlice = (): Slice => ({ flows: {}, broken: {}, envs: {}, invalid: {}, responses: {}, runs: {}, extracted: {} });
+const pick = (s: FlowsState): Slice => Object.fromEntries(SLICE_KEYS.map((k) => [k, s[k]])) as Slice;
+
+/** Workspaces switched away from, with their bookkeeping, so switching back finds everything as it was. */
+const parked = new Map<string, { slice: Slice; lastWritten: Map<string, string>; lastValid: Map<string, FlowDoc> }>();
+
+/** A workspace's state, whether it's the open one or parked. */
+export function sliceOf(root: string): Slice | undefined {
+  return get().root === root ? pick(get()) : parked.get(root)?.slice;
+}
+
+/**
+ * Updates a workspace's state wherever it is. A run keeps writing here after
+ * you switch to another workspace, so its results are there when you come back.
+ */
+export function updateSlice(root: string, fn: (s: Slice) => Partial<Slice>) {
+  if (get().root === root) return set((s) => fn(pick(s)));
+  const p = parked.get(root);
+  if (p) p.slice = { ...p.slice, ...fn(p.slice) };
+}
+
 /** Key for per-request state: step ids are only unique within one flow file. */
 export function rk(path: string, stepId: string): string {
   return `${path}#${stepId}`;
@@ -54,9 +78,23 @@ let reloadTimer: number | undefined;
 
 export async function syncWorkspace(root: string | null) {
   if (get().root === root && get().loaded) return;
-  set({ root, loaded: false, flows: {}, broken: {}, envs: {}, invalid: {}, responses: {}, runs: {}, extracted: {} });
+  const prev = get().root;
+  if (prev && prev !== root) {
+    // Edits waiting to be saved belong to the workspace being left: save them now, to it.
+    for (const path of [...saveTimers.keys()]) {
+      window.clearTimeout(saveTimers.get(path));
+      saveTimers.delete(path);
+      saveNow(path);
+    }
+    parked.set(prev, { slice: pick(get()), lastWritten: new Map(lastWritten), lastValid: new Map(lastValid) });
+  }
+  const back = root ? parked.get(root) : undefined;
+  if (root) parked.delete(root);
+  set({ root, loaded: false, ...(back?.slice ?? emptySlice()) });
   lastWritten.clear();
   lastValid.clear();
+  back?.lastWritten.forEach((v, k) => lastWritten.set(k, v));
+  back?.lastValid.forEach((v, k) => lastValid.set(k, v));
   if (!root) return;
   await reload(root);
   api.auxinWatch(root).catch(() => undefined);
@@ -148,6 +186,12 @@ export function write(path: string, text: string) {
     });
 }
 
+/** Writes a file into a workspace's `.auxin`, whether it's the open one or not. */
+export function writeTo(root: string, path: string, text: string) {
+  if (get().root === root) return write(path, text);
+  return api.auxinWrite(root, path, text).catch((e) => toast("error", `Couldn't save ${path}`, String(e)));
+}
+
 /** Applies an edit now and writes the file shortly after (edits coalesce). */
 export function updateFlow(path: string, fn: (f: FlowDoc) => FlowDoc) {
   const cur = get().flows[path];
@@ -160,20 +204,24 @@ export function updateFlow(path: string, fn: (f: FlowDoc) => FlowDoc) {
     path,
     window.setTimeout(() => {
       saveTimers.delete(path);
-      const doc = get().flows[path];
-      if (!doc) return void pending.delete(path);
-      const { text, invalid } = serializeFlow(doc, lastValid.get(path));
-      set((s) => {
-        const inv = { ...s.invalid };
-        allSteps(doc.steps).forEach((st) => delete inv[rk(path, st.id)]);
-        invalid.forEach((id) => (inv[rk(path, id)] = "Invalid JSON: not saved until it parses"));
-        return { invalid: inv };
-      });
-      if (!invalid.length) lastValid.set(path, doc);
-      if (lastWritten.get(path) !== text) void write(path, text);
-      else pending.delete(path);
+      saveNow(path);
     }, 300),
   );
+}
+
+function saveNow(path: string) {
+  const doc = get().flows[path];
+  if (!doc) return void pending.delete(path);
+  const { text, invalid } = serializeFlow(doc, lastValid.get(path));
+  set((s) => {
+    const inv = { ...s.invalid };
+    allSteps(doc.steps).forEach((st) => delete inv[rk(path, st.id)]);
+    invalid.forEach((id) => (inv[rk(path, id)] = "Invalid JSON: not saved until it parses"));
+    return { invalid: inv };
+  });
+  if (!invalid.length) lastValid.set(path, doc);
+  if (lastWritten.get(path) !== text) void write(path, text);
+  else pending.delete(path);
 }
 
 export function updateStep(path: string, stepId: string, patch: Partial<FlowStep>) {
@@ -247,10 +295,11 @@ export function serviceIdFor(ref: string): string {
   return `${get().root}/${ref}`;
 }
 
-export function servicePorts(doc?: FlowDoc): { urls: Record<string, string>; portToService: Record<number, string> } {
+/** `envName` defaults to the active environment; a run can use another. */
+export function servicePorts(doc?: FlowDoc, envName = activeEnvName()): { urls: Record<string, string>; portToService: Record<number, string> } {
   const s = useStore.getState();
   const services = selectServices(s);
-  const env = get().envs[activeEnvName()];
+  const env = get().envs[envName];
   const urls: Record<string, string> = {};
   const portToService: Record<number, string> = {};
   const urlOf = (svc: (typeof services)[number], name: string) => {
@@ -276,9 +325,9 @@ export function servicePorts(doc?: FlowDoc): { urls: Record<string, string>; por
   return { urls, portToService };
 }
 
-export function varSources(doc?: FlowDoc, extra?: Record<string, string>): VarSources {
-  const env = get().envs[activeEnvName()];
-  return { extra, secrets: env?.secrets ?? {}, vars: env?.vars ?? {}, serviceUrls: servicePorts(doc).urls };
+export function varSources(doc?: FlowDoc, extra?: Record<string, string>, envName = activeEnvName()): VarSources {
+  const env = get().envs[envName];
+  return { extra, secrets: env?.secrets ?? {}, vars: env?.vars ?? {}, serviceUrls: servicePorts(doc, envName).urls };
 }
 
 /** Keep flows in step with the active workspace. */

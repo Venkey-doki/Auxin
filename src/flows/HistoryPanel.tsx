@@ -4,13 +4,15 @@
  * environment. Each request keeps its (redacted) request and response.
  */
 import { ChevronRight, RefreshCw, RotateCcw, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { StatusMark, STATUS_TEXT, type Shown } from "../components/status";
 import { Button, cx, IconButton } from "../components/ui";
 import { formatMs, MethodBadge } from "./parts";
-import { HeaderList } from "./StepDetail";
 import { isRunning, loadHistory, replayRun, type RunRecord } from "./runner";
+import { HeaderList } from "./StepDetail";
 import { useFlows } from "./store";
+import { TrendList } from "./TrendList";
+import { flowTrends } from "./trends";
 
 const TONE: Record<RunRecord["status"], Shown> = { passed: "running", failed: "crashed", cancelled: "stopped", running: "starting" };
 const STEP_TONE: Record<string, Shown> = { passed: "running", failed: "crashed", error: "crashed", skipped: "stopped", cancelled: "stopped", queued: "queued", sending: "starting", polling: "starting" };
@@ -20,6 +22,8 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
   const [runs, setRuns] = useState<RunRecord[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const running = run?.status === "running" || isRunning(path);
+  const [showTrends, setShowTrends] = useState(true);
+  const trends = useMemo(() => flowTrends(runs ?? []), [runs]);
 
   const load = () => void loadHistory(path).then(setRuns);
   // Reload once a finished run's history file is written.
@@ -41,6 +45,16 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
       <div className="min-h-0 flex-1 overflow-y-auto">
         {runs == null && <p className="p-4 text-sm text-fg-3">Loading…</p>}
         {runs?.length === 0 && <p className="p-4 text-sm text-fg-3">No runs yet. Press Run flow; every run is kept in .auxin/runs (ignored by git).</p>}
+        {runs && runs.length >= 2 && (
+          <section className="border-b border-line pb-1" aria-label="Trends">
+            <button className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-surface-2" onClick={() => setShowTrends((v) => !v)} aria-expanded={showTrends}>
+              <ChevronRight className={cx("size-3.5 flex-none text-fg-3 transition-transform", showTrends && "rotate-90")} />
+              <span className="text-sm font-semibold">Trends</span>
+              <span className="text-xs text-fg-3">response times over the last {runs.length} runs, oldest first</span>
+            </button>
+            {showTrends && <TrendList trends={trends} />}
+          </section>
+        )}
         {runs?.map((r, i) => {
           const prev = runs[i + 1];
           const total = r.steps.reduce((a, s) => a + (s.ms ?? 0), 0);

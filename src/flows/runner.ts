@@ -12,7 +12,8 @@ import { serviceKey } from "../map/model";
 import { recordObserved } from "../map/store";
 import { spanHops, spanLinks } from "./spans";
 import { allSteps, DEFAULT_NETWORK, parseFlow, serializeFlow, slugify, type FlowDoc, type FlowStep, type KV } from "./model";
-import { activeEnvName, rk, serviceIdFor, servicePorts, useFlows, varSources, write } from "./store";
+import { activeEnvName, rk, serviceIdFor, servicePorts, sliceOf, updateSlice, useFlows, varSources, writeTo } from "./store";
+import type { VarSources } from "./vars";
 import { computeTrace, correlationValues, isCorrelationValue, type TraceResult, type TraceService } from "./trace";
 
 export type StepState = "queued" | "sending" | "polling" | "passed" | "failed" | "error" | "skipped" | "cancelled";
@@ -68,24 +69,32 @@ export interface FlowRunState {
 }
 
 const get = useFlows.getState;
-const set = useFlows.setState;
 
 const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 const newId = () => `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-/** Outcomes are keyed by `rk(path, stepId)`; `key` is that composite key. */
-function setOutcome(key: string, o: StepOutcome) {
-  set((s) => ({ responses: { ...s.responses, [key]: o } }));
+/**
+ * Outcomes are keyed by `rk(path, stepId)` within a workspace. Sends and runs
+ * write to the workspace they started in, even after you switch to another.
+ */
+function setOutcome(root: string, key: string, o: StepOutcome) {
+  updateSlice(root, (s) => ({ responses: { ...s.responses, [key]: o } }));
 }
 
-function patchOutcome(key: string, reqId: string, patch: Partial<StepOutcome>) {
-  const cur = get().responses[key];
-  if (cur?.reqId === reqId) setOutcome(key, { ...cur, ...patch });
+function patchOutcome(root: string, key: string, reqId: string, patch: Partial<StepOutcome>) {
+  const cur = sliceOf(root)?.responses[key];
+  if (cur?.reqId === reqId) setOutcome(root, key, { ...cur, ...patch });
 }
 
 /* ---------- one request ---------- */
 
 interface ExecContext {
+  /** The workspace this send or run belongs to. */
+  root: string;
+  /** The environment this send or run uses. */
+  env: string;
+  /** Variable sources when it started; used if you've since switched workspace. */
+  base: VarSources;
   extra: Record<string, string>;
   jar: string;
   cancelled: () => boolean;
@@ -101,7 +110,7 @@ interface ExecContext {
 async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<StepOutcome> {
   if (step.queue) return executeQueue(doc, step, ctx);
   const key = rk(doc.path, step.id);
-  const src = varSources(doc, ctx.extra);
+  const src = sources(ctx, doc);
   const reqId = newId();
   const req = prepareRequest(step, src, doc.injectHeaders);
   const shown = {
@@ -120,47 +129,48 @@ async function execute(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<
       ? `Not sent: ${portUnknown(svc)}`
       : earlier.length
         ? `Not sent: ${earlier.map((m) => `{{${m}}}`).join(", ")} comes from an earlier request. Send that one first, or press Run flow.`
-        : `Not sent: ${names} ${missing.length > 1 ? "have" : "has"} no value in “${activeEnvName()}”. Add ${missing.length > 1 ? "them" : "it"} under Environment.`;
+        : `Not sent: ${names} ${missing.length > 1 ? "have" : "has"} no value in “${ctx.env}”. Add ${missing.length > 1 ? "them" : "it"} under Environment.`;
     const o: StepOutcome = { ...base, state: "error", finishedAt: Date.now(), error, missingService: svc };
-    setOutcome(key, o);
+    setOutcome(ctx.root, key, o);
     return o;
   }
 
-  setOutcome(key, base);
-  const envName = activeEnvName();
-  const env = get().envs[envName];
+  setOutcome(ctx.root, key, base);
+  const envName = ctx.env;
+  const env = sliceOf(ctx.root)?.envs[envName];
   const result = await runHttpStep(
     step,
     req,
-    { reqId, jar: ctx.jar, insecureTls: env?.insecureTls ?? false, root: get().root, policy: { ...(env?.network ?? DEFAULT_NETWORK), env: envName } },
+    { reqId, jar: ctx.jar, insecureTls: env?.insecureTls ?? false, root: ctx.root, policy: { ...(env?.network ?? DEFAULT_NETWORK), env: envName } },
     {
       send: api.httpSend,
       cancelled: ctx.cancelled,
       sleep,
-      onPoll: ({ tries, res }) => patchOutcome(key, reqId, res ? { res, tries } : { state: "polling", tries }),
-      onRetry: ({ attempt, of, last }) => patchOutcome(key, reqId, { state: "sending", retrying: { attempt, of }, res: last.res, error: last.error ? mask(last.error, req.usedSecrets, src) : undefined }),
+      onPoll: ({ tries, res }) => patchOutcome(ctx.root, key, reqId, res ? { res, tries } : { state: "polling", tries }),
+      onRetry: ({ attempt, of, last }) => patchOutcome(ctx.root, key, reqId, { state: "sending", retrying: { attempt, of }, res: last.res, error: last.error ? mask(last.error, req.usedSecrets, src) : undefined }),
       onInflight: ctx.onInflight,
     },
   );
 
-  const current = get().responses[key]?.reqId === reqId ? get().responses[key] : base;
+  const latest = sliceOf(ctx.root)?.responses[key];
+  const current = latest?.reqId === reqId ? latest : base;
   const o: StepOutcome = { ...current, ...result, retrying: undefined, finishedAt: Date.now() };
   // Error text can echo the URL (and any secret resolved into it).
   if (o.error) o.error = mask(o.error, req.usedSecrets, src);
   if (o.state !== "cancelled" && (o.res || o.state === "error")) o.tracing = !!o.res;
-  setOutcome(key, o);
+  setOutcome(ctx.root, key, o);
   // Only secrets this request used, and long enough to be distinctive.
-  if (o.res) scheduleTrace(doc, step, o, req.bodyText, req.usedSecrets.map((n) => src.secrets[n]).filter((v) => v && v.length >= 4));
+  if (o.res) scheduleTrace(ctx.root, doc, step, o, req.bodyText, req.usedSecrets.map((n) => src.secrets[n]).filter((v) => v && v.length >= 4), ctx.env);
   return o;
 }
 
 /** A queue step: publish a message, or wait for one. Shown in the UI like a request. */
 async function executeQueue(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Promise<StepOutcome> {
   const key = rk(doc.path, step.id);
-  const src = varSources(doc, ctx.extra);
+  const src = sources(ctx, doc);
   const reqId = newId();
-  const envName = activeEnvName();
-  const env = get().envs[envName];
+  const envName = ctx.env;
+  const env = sliceOf(ctx.root)?.envs[envName];
   const prep = prepareQueue(step, src, env?.brokers ?? {}, doc.injectHeaders);
   const q = step.queue!;
   const where = q.destination || `(default exchange) ${q.routingKey}`;
@@ -178,10 +188,10 @@ async function executeQueue(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Pro
   };
   if (prep.missing.length) {
     const o: StepOutcome = { ...base, state: "error", finishedAt: Date.now(), error: `Not sent: ${prep.missing.map((m) => `{{${m}}}`).join(", ")} has no value yet.` };
-    setOutcome(key, o);
+    setOutcome(ctx.root, key, o);
     return o;
   }
-  setOutcome(key, base);
+  setOutcome(ctx.root, key, base);
   const result = await runQueueStep(
     step,
     prep,
@@ -198,9 +208,14 @@ async function executeQueue(doc: FlowDoc, step: FlowStep, ctx: ExecContext): Pro
   const o: StepOutcome = { ...base, ...result, finishedAt: Date.now() };
   // Error text can echo a broker URL (and any secret resolved into it).
   if (o.error) o.error = mask(o.error, prep.usedSecrets, src);
-  setOutcome(key, o);
-  if (o.published) scheduleSpans(doc, step, o);
+  setOutcome(ctx.root, key, o);
+  if (o.published) scheduleSpans(ctx.root, doc, step, o);
   return o;
+}
+
+/** Variable sources for a step: live while its workspace is open, else as they were when it started. */
+function sources(ctx: ExecContext, doc: FlowDoc): VarSources {
+  return get().root === ctx.root ? varSources(doc, ctx.extra, ctx.env) : { ...ctx.base, extra: ctx.extra };
 }
 
 /** The ids a consumer would carry if it passed on what this flow's steps sent. */
@@ -218,11 +233,11 @@ function serviceWithoutPort(doc: FlowDoc, name: string): string | undefined {
 const portUnknown = (svc: string) => `Auxin doesn't know ${svc}'s port yet. Start it once and its port is remembered, or set its URL under Environment.`;
 
 /** What would stop this flow from running, checked without sending anything. */
-export function flowIssues(doc: FlowDoc): Issue[] {
+export function flowIssues(doc: FlowDoc, envName = activeEnvName()): Issue[] {
   return validateFlow(doc.steps, {
-    src: varSources(doc, {}),
-    envName: activeEnvName(),
-    brokers: get().envs[activeEnvName()]?.brokers ?? {},
+    src: varSources(doc, {}, envName),
+    envName,
+    brokers: get().envs[envName]?.brokers ?? {},
     explain: (name) => {
       const svc = serviceWithoutPort(doc, name);
       return svc ? portUnknown(svc) : undefined;
@@ -235,14 +250,16 @@ export function flowIssues(doc: FlowDoc): Issue[] {
 const pendingTraces = new Map<string, Promise<void>>();
 
 /** Waits the grace period (late log lines), then matches lines (§5). */
-function scheduleTrace(doc: FlowDoc, step: FlowStep, o: StepOutcome, requestBody: string, secretValues: string[]) {
+function scheduleTrace(root: string, doc: FlowDoc, step: FlowStep, o: StepOutcome, requestBody: string, secretValues: string[], envName: string) {
   const p = (async () => {
     await sleep(doc.graceMs);
+    // Logs, services and spans on screen belong to the open workspace; a run left running elsewhere goes without a trace.
+    if (get().root !== root) return patchOutcome(root, rk(doc.path, step.id), o.reqId, { tracing: false });
     const s = useStore.getState();
     const services = selectServices(s);
     const flowIds = new Set(doc.services.map((f) => serviceIdFor(f.ref)));
     const aliasOf = (id: string) => doc.services.find((f) => serviceIdFor(f.ref) === id)?.alias ?? services.find((x) => x.id === id)?.name ?? id;
-    const { portToService } = servicePorts(doc);
+    const { portToService } = servicePorts(doc, envName);
     let entry: string | undefined;
     try {
       const port = Number(new URL(o.url.replace("••••••", "x")).port || 0);
@@ -278,7 +295,7 @@ function scheduleTrace(doc: FlowDoc, step: FlowStep, o: StepOutcome, requestBody
     // Spans, when the services send them, replace the log hops with measured ones.
     const spans = await fetchSpans(o);
     const hops = spans.length ? spanHops(spans, (name) => flowServiceNamed(doc, name)) : [];
-    patchOutcome(rk(doc.path, step.id), o.reqId, { tracing: false, trace: hops.length ? { ...trace, hops, source: "otel" } : trace, ...(spans.length ? { spans } : {}) });
+    patchOutcome(root, rk(doc.path, step.id), o.reqId, { tracing: false, trace: hops.length ? { ...trace, hops, source: "otel" } : trace, ...(spans.length ? { spans } : {}) });
     observe(doc, trace.traffic, "traffic", (from, to) => `Request ${o.requestId} was logged by ${from}, then by ${to}`);
     observeSpans(spans, o.requestId);
   })();
@@ -315,14 +332,15 @@ function observeSpans(spans: Span[], requestId?: string) {
 }
 
 /** A publish step's trace: only spans, since there's no response or entry port to match logs with. */
-function scheduleSpans(doc: FlowDoc, step: FlowStep, o: StepOutcome) {
+function scheduleSpans(root: string, doc: FlowDoc, step: FlowStep, o: StepOutcome) {
   if (!o.traceId) return;
   const p = (async () => {
     await sleep(doc.graceMs);
+    if (get().root !== root) return;
     const spans = await fetchSpans(o);
     if (!spans.length) return;
     const hops = spanHops(spans, (name) => flowServiceNamed(doc, name));
-    patchOutcome(rk(doc.path, step.id), o.reqId, { spans, trace: { lines: [], nearby: [], hops, matchedBy: [], unavailable: [], traffic: [], source: "otel" } });
+    patchOutcome(root, rk(doc.path, step.id), o.reqId, { spans, trace: { lines: [], nearby: [], hops, matchedBy: [], unavailable: [], traffic: [], source: "otel" } });
     observeSpans(spans, o.requestId);
   })();
   pendingTraces.set(o.reqId, p);
@@ -351,8 +369,13 @@ export async function sendStep(path: string, step: FlowStep) {
   // One request at a time per step, and never alongside a run of the same flow.
   if (!doc || isRunning(path) || isBusy(path, step.id)) return;
   const key = rk(path, step.id);
+  const root = get().root!;
+  const env = activeEnvName();
   cancelledSteps.delete(key);
   const o = await execute(doc, step, {
+    root,
+    env,
+    base: varSources(doc, {}, env),
     extra: get().extracted[path] ?? {},
     jar: sessionJar(path),
     traceIds: () => idsOf(allSteps(doc.steps).map((s) => get().responses[rk(path, s.id)])),
@@ -364,7 +387,7 @@ export async function sendStep(path: string, step: FlowStep) {
   });
   cancelledSteps.delete(key);
   // Values from a single send feed later sends, so steps can be tried one by one.
-  if (o.extracted.length) set((s) => ({ extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...Object.fromEntries(o.extracted.map((e) => [e.key, e.value])) } } }));
+  if (o.extracted.length) updateSlice(root, (s) => ({ extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...Object.fromEntries(o.extracted.map((e) => [e.key, e.value])) } } }));
 }
 
 const cancelledSteps = new Set<string>();
@@ -387,7 +410,12 @@ export function isRunning(path: string): boolean {
   return get().runs[path]?.status === "running";
 }
 
-export async function runFlow(path: string, replay?: RunRecord) {
+/**
+ * Runs a flow. `replay` runs the flow as it was saved in that run; `env` runs it
+ * in another environment without changing the one picked in the top bar.
+ */
+export async function runFlow(path: string, opts: { replay?: RunRecord; env?: string } = {}) {
+  const replay = opts.replay;
   const current = get().flows[path];
   // A replay runs the flow as it was saved in that run.
   const doc = replay?.snapshot ? parseFlow(path, JSON.stringify(replay.snapshot)) : current;
@@ -398,37 +426,44 @@ export async function runFlow(path: string, replay?: RunRecord) {
     toast("info", "A request in this flow is still sending", "Wait for it, or cancel it, then run the flow.");
     return;
   }
-  const errors = flowIssues(doc).filter((i) => i.level === "error");
+  const env = opts.env ?? activeEnvName();
+  const errors = flowIssues(doc, env).filter((i) => i.level === "error");
   if (errors.length) {
     toast("error", errors.length === 1 ? "Fix this before running the flow" : `Fix ${errors.length} problems before running the flow`, errors[0].message);
     return;
   }
   const runId = newId();
-  const env = activeEnvName();
   const startedAt = Date.now();
+  const root = get().root!;
+  const base = varSources(doc, {}, env);
   let cancelled = false;
   const inflightIds = new Set<string>();
-  runCancel.set(path, () => {
+  runCancel.set(runKey(root, path), () => {
     cancelled = true;
     inflightIds.forEach((id) => void api.httpCancel(id));
   });
-  set((s) => ({
+  updateSlice(root, (s) => ({
     runs: { ...s.runs, [path]: { runId, status: "running", startedAt, env, branches: {}, replayOf: replay?.runId } },
     responses: { ...s.responses, ...Object.fromEntries(steps.map((st) => [rk(path, st.id), { state: "queued", reqId: `${runId}-q`, sentAt: startedAt, method: st.method, url: st.url, headers: [], checks: [], extracted: [] } as StepOutcome])) },
   }));
 
-  const stopSampler = startConnectionSampler(path);
+  const stopSampler = startConnectionSampler(path, root);
   const jar = `run:${runId}`;
   const extra: Record<string, string> = {};
   // Listen from the start of the run, so a message caused by an earlier step isn't missed.
-  const subscriptions = await openSubscriptions(doc, runId);
+  const subscriptions = await openSubscriptions(doc, runId, env);
   const runIds: string[] = [];
   const { outcomes, branches, status } = await runItems<StepOutcome>(doc.steps, {
     run: async (step) => {
       // Edits made while running apply to requests not sent yet (not in a replay).
-      const latest = (!replay && allSteps(get().flows[path]?.steps ?? []).find((s) => s.id === step.id)) || step;
+      const live = sliceOf(root)?.flows[path];
+      const latest = (!replay && allSteps(live?.steps ?? []).find((s) => s.id === step.id)) || step;
       let mine: string | null = null;
-      const o = await execute(replay ? doc : (get().flows[path] ?? doc), latest, {
+      const runDoc = replay ? doc : (live ?? doc);
+      const o = await execute(runDoc, latest, {
+        root,
+        env,
+        base,
         extra,
         jar,
         cancelled: () => cancelled,
@@ -445,8 +480,8 @@ export async function runFlow(path: string, replay?: RunRecord) {
       return o;
     },
     notRun: (step, why) => {
-      const o: StepOutcome = { ...get().responses[rk(path, step.id)], state: why };
-      setOutcome(rk(path, step.id), o);
+      const o: StepOutcome = { ...sliceOf(root)?.responses[rk(path, step.id)]!, state: why };
+      setOutcome(root, rk(path, step.id), o);
       return o;
     },
     isCancelled: () => cancelled,
@@ -454,33 +489,33 @@ export async function runFlow(path: string, replay?: RunRecord) {
   stopSampler();
   // Consume steps close their own; this catches the ones that were skipped.
   subscriptions.forEach((sub) => void api.stepCancel(sub).catch(() => undefined));
-  runCancel.delete(path);
+  runCancel.delete(runKey(root, path));
   void api.httpDropJar(jar).catch(() => undefined);
 
-  set((s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], status, branches, finishedAt: Date.now() } }, extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...extra } } }));
+  const finishedAt = Date.now();
+  updateSlice(root, (s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], status, branches, finishedAt } }, extracted: { ...s.extracted, [path]: { ...s.extracted[path], ...extra } } }));
 
   // History includes each step's trace summary, so wait for the traces; then
   // use this run's own outcomes (a send made meanwhile must not leak in).
   await Promise.all([...outcomes.values()].map((o) => pendingTraces.get(o.reqId)).filter(Boolean));
   const final = steps.map((st) => {
     const o = outcomes.get(st.id);
-    const latest = get().responses[rk(path, st.id)];
+    const latest = sliceOf(root)?.responses[rk(path, st.id)];
     return o && latest?.reqId === o.reqId ? latest : o;
   });
-  await saveHistory(path, doc, runId, env, startedAt, status, final, branches, replay?.runId);
-  set((s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], historySavedAt: Date.now() } } }));
+  await saveHistory(root, path, doc, runId, env, startedAt, finishedAt, status, final, branches, replay?.runId);
+  updateSlice(root, (s) => ({ runs: { ...s.runs, [path]: { ...s.runs[path], historySavedAt: Date.now() } } }));
 }
 
 /** Opens a subscription for each consume step whose broker is set up; failures surface at the step itself. */
-async function openSubscriptions(doc: FlowDoc, runId: string): Promise<Map<string, string>> {
-  const envName = activeEnvName();
+async function openSubscriptions(doc: FlowDoc, runId: string, envName: string): Promise<Map<string, string>> {
   const env = get().envs[envName];
   const subs = new Map<string, string>();
   await Promise.all(
     allSteps(doc.steps)
       .filter((s) => s.type === "queue.consume")
       .map(async (s) => {
-        const prep = prepareQueue(s, varSources(doc, {}), env?.brokers ?? {}, false);
+        const prep = prepareQueue(s, varSources(doc, {}, envName), env?.brokers ?? {}, false);
         if (!prep.broker || prep.missing.length) return;
         const id = `${runId}:${s.id}`;
         try {
@@ -496,12 +531,14 @@ async function openSubscriptions(doc: FlowDoc, runId: string): Promise<Map<strin
 
 /** Runs the flow as it was saved in `rec`, with the current environment. */
 export function replayRun(path: string, rec: RunRecord) {
-  return runFlow(path, rec);
+  return runFlow(path, { replay: rec });
 }
 
 export function cancelRun(path: string) {
-  runCancel.get(path)?.();
+  runCancel.get(runKey(get().root ?? "", path))?.();
 }
+
+const runKey = (root: string, path: string) => `${root}\u0000${path}`;
 
 /* ---------- run history (§2: .auxin/runs/<flow>/, last 30) ---------- */
 
@@ -552,10 +589,8 @@ const runsDir = (path: string) => `runs/${slugify(path.replace(/^flows\//, "").r
  * `outcomes` follows `allSteps(doc.steps)`. Bodies are kept redacted: secret
  * values and token-like JSON fields are hidden, and each body is capped.
  */
-async function saveHistory(path: string, doc: FlowDoc, runId: string, env: string, startedAt: number, status: FlowRunState["status"], outcomes: (StepOutcome | undefined)[], branches: Record<string, "then" | "else">, replayOf?: string) {
-  const root = get().root;
-  if (!root) return;
-  const secrets = Object.values(get().envs[env]?.secrets ?? {});
+async function saveHistory(root: string, path: string, doc: FlowDoc, runId: string, env: string, startedAt: number, finishedAt: number, status: FlowRunState["status"], outcomes: (StepOutcome | undefined)[], branches: Record<string, "then" | "else">, replayOf?: string) {
+  const secrets = Object.values(sliceOf(root)?.envs[env]?.secrets ?? {});
   const rec: RunRecord = {
     version: 2,
     flow: doc.name,
@@ -563,7 +598,8 @@ async function saveHistory(path: string, doc: FlowDoc, runId: string, env: strin
     ...(replayOf ? { replayOf } : {}),
     env,
     startedAt: new Date(startedAt).toISOString(),
-    finishedAt: new Date().toISOString(),
+    // When the last step finished, not when the traces were collected after it.
+    finishedAt: new Date(finishedAt).toISOString(),
     status,
     snapshot: JSON.parse(serializeFlow(doc).text),
     branches,
@@ -594,7 +630,7 @@ async function saveHistory(path: string, doc: FlowDoc, runId: string, env: strin
     }),
   };
   const dir = runsDir(path);
-  await write(`${dir}/${rec.startedAt.replace(/[:.]/g, "-")}.json`, JSON.stringify(rec, null, 2) + "\n");
+  await writeTo(root, `${dir}/${rec.startedAt.replace(/[:.]/g, "-")}.json`, JSON.stringify(rec, null, 2) + "\n");
   try {
     const names = (await api.auxinListDir(root, dir)).filter((n) => n.endsWith(".json")).sort();
     for (const old of names.slice(0, Math.max(0, names.length - KEEP_RUNS))) await api.auxinDelete(root, `${dir}/${old}`);
@@ -627,7 +663,7 @@ function requestBodyText(st: FlowStep): string | undefined {
 
 /* ---------- connection sampling during runs (§4.4) ---------- */
 
-function startConnectionSampler(path: string): () => void {
+function startConnectionSampler(path: string, root: string): () => void {
   const doc = get().flows[path];
   if (!doc || doc.services.length < 2) return () => undefined;
   let stopped = false;
@@ -653,7 +689,8 @@ function startConnectionSampler(path: string): () => void {
           const pairs = await api.sampleConnections(groups, portOwner);
           const fresh = pairs.filter(([a, b]) => !seen.has(`${a}→${b}`));
           fresh.forEach(([a, b]) => seen.add(`${a}→${b}`));
-          observe(doc, fresh, "connection", (from, to) => `${from} held a TCP connection to ${to}'s port during a run`);
+          // Connections are only meaningful for the services of the open workspace.
+          if (get().root === root) observe(doc, fresh, "connection", (from, to) => `${from} held a TCP connection to ${to}'s port during a run`);
         } catch {
           stopped = true; // sampling is optional; never break a run over it
         }

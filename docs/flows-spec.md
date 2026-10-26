@@ -124,6 +124,12 @@ It must work for any project:
 
 Each run is saved as a version 2 record: status and timing per request; the request and response headers and bodies (secret values and token-like JSON fields such as `accessToken` or `password` hidden; credential headers hidden; each body cut at 64 KB); the lane each if block took; and a snapshot of the flow file as it was. **Replay** in run history runs that snapshot again with the current environment and saves a new record linked to the old one by `replayOf`. Records from before this version have no snapshot and can't be replayed.
 
+**Trends.** Run history opens with a trends table: for the whole run and each request, a sparkline of its time in each saved run (oldest on the left, red dots for failed runs, the latest run highlighted; hover a point for the run's time and date), the median (p50) and 95th percentile (p95), and how many runs failed out of those that sent it. Runs that skipped a request leave a gap. It's computed from the saved records; nothing extra is stored.
+
+**Running in another environment.** With more than one environment, the arrow next to *Run flow* runs the flow once in another one without changing the one picked in the top bar. Variables, secrets, service URLs, brokers and network rules all come from that environment; the run summary and its history record name it.
+
+**Switching workspaces.** Each workspace keeps its flows, results, runs and map while you're in another one, and the request you had open in each flow. A run still going when you switch keeps running and saves its history to its own workspace; its log trace and spans are skipped, since the logs and spans on screen belong to the workspace you switched to.
+
 ## 3. Variables, extraction, checks, polling
 
 **Resolution order** for `{{name}}`, in URL, headers and body:
