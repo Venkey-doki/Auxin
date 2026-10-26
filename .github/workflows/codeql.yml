@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      # CodeQL reads its own workflow run.
+      actions: read
       security-events: write
     strategy:
       fail-fast: false

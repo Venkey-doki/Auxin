@@ -539,7 +539,16 @@ fn kafka_failed(e: KafkaError, at: &str) -> String {
             format!("Kafka at {at} refused the request: {protocol_error}{}", error_message.map(|m| format!(" ({m})")).unwrap_or_default())
         }
         KafkaError::Connection(_) | KafkaError::RetryFailed(_) | KafkaError::Timeout => format!("Lost the connection to Kafka at {at}."),
-        e => format!("Kafka at {at} failed: {e}"),
+        e => {
+            let msg = e.to_string();
+            // Built without zstd (see Cargo.toml), so a zstd-compressed batch can't be decoded.
+            if msg.contains("Unimplemented compression: Zstd") {
+                return format!(
+                    "Kafka at {at} sent zstd-compressed messages, which Auxin can't read yet. Have the producer use gzip, lz4, snappy or no compression for this topic."
+                );
+            }
+            format!("Kafka at {at} failed: {msg}")
+        }
     }
 }
 
@@ -759,6 +768,14 @@ mod tests {
         let off = NetPolicy { allow_private: false, allow_hosts: Vec::new(), env: "prod".into() };
         let err = tauri::async_runtime::block_on(kafka_client(&kafka_brokers("localhost:9092").unwrap(), &off)).unwrap_err();
         assert!(err.starts_with("Blocked by the network rules of “prod”: localhost is a private address"), "{err}");
+    }
+
+    #[test]
+    fn a_zstd_batch_gets_a_plain_explanation() {
+        let e = KafkaError::InvalidResponse("Cannot read data: Malformed data: Unimplemented compression: Zstd".into());
+        assert!(kafka_failed(e, "localhost:9092").starts_with("Kafka at localhost:9092 sent zstd-compressed messages, which Auxin can't read yet."));
+        let other = kafka_failed(KafkaError::InvalidResponse("bad header".into()), "x:1");
+        assert_eq!(other, "Kafka at x:1 failed: Invalid response: bad header");
     }
 
     #[test]

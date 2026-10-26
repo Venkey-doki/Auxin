@@ -101,7 +101,7 @@ It must work for any project:
   "extract": { "paymentId": "body.paymentId" } }
 ```
 
-- `destination` is a RabbitMQ exchange (`""` is the default exchange: the routing key is then the queue name) or a Kafka topic. RabbitMQ uses `routingKey` (for consume, the binding pattern; `#` takes everything); Kafka publish can set a message `key`.
+- `destination` is a RabbitMQ exchange (`""` is the default exchange: the routing key is then the queue name) or a Kafka topic. RabbitMQ uses `routingKey` (for consume, the binding pattern; `#` takes everything); Kafka publish can set a message `key`. Kafka messages compressed with gzip, lz4 or snappy are read; zstd isn't yet (the zstd library rskafka depends on has known vulnerabilities), and such a topic shows an error saying so.
 - Publish adds `X-Request-ID` and `traceparent` headers, like a request.
 - **Consume never takes messages from your services.** On RabbitMQ it listens through its own temporary queue bound to the exchange; on Kafka it reads each partition from the newest offset without a consumer group. A message sent straight to a queue (default exchange) can't be watched this way.
 - Network rules (§2.2) are checked on the broker address in `url`. Kafka then connects to each partition's leader at the address the cluster advertises, and those addresses aren't checked.
