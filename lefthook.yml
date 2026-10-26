@@ -1,0 +1,35 @@
+# Git hooks, installed by `npm install` (the `prepare` script runs `lefthook install`).
+# CI runs the same checks, so skipping a hook (--no-verify) only delays the failure.
+
+pre-commit:
+  parallel: true
+  commands:
+    prettier:
+      glob: "*.{ts,tsx,js,mjs,cjs,json,css,yml,yaml}"
+      run: npx prettier --write --ignore-unknown {staged_files}
+      stage_fixed: true
+    rustfmt:
+      glob: "*.rs"
+      run: rustfmt --edition 2024 {staged_files}
+      stage_fixed: true
+
+commit-msg:
+  commands:
+    commitlint:
+      run: npx commitlint --edit {1}
+
+pre-push:
+  parallel: true
+  commands:
+    format:
+      run: npm run -s format:check
+    eslint:
+      run: npm run -s lint -- --max-warnings 0
+    typecheck:
+      run: npm run -s typecheck
+    vitest:
+      run: npm test --silent
+    clippy:
+      run: npm run -s lint:rust
+    cargo-test:
+      run: cargo test --manifest-path src-tauri/Cargo.toml --quiet

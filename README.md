@@ -28,10 +28,9 @@ npm run dev           # UI only, in a browser, with a fake backend (src/dev/mock
 npm run tauri build   # .app / .dmg in src-tauri/target/release/bundle
 ```
 
-Tests:
+Checks, git hooks and the commit message format: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
-cd src-tauri && cargo test --lib -- --test-threads=1
 AUXIN_SCAN_ROOT=~/code cargo test scan_prints -- --nocapture --ignored   # print what the scanner detects
 ```
 
