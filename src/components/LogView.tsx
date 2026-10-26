@@ -47,6 +47,8 @@ export function LogView({ ids, tagged = false, compact = false, inputFor, empty 
   }, [all, q, errorsOnly]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Its functions can't be memoised by the React Compiler, which this app doesn't use.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virt = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -76,7 +78,7 @@ export function LogView({ ids, tagged = false, compact = false, inputFor, empty 
     const raf = requestAnimationFrame(pinToBottom);
     setSeenSeq(lastSeq);
     return () => cancelAnimationFrame(raf);
-  }, [lastSeq, rows.length, follow, wrap, times]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lastSeq, rows.length, follow, wrap, times]);
 
   // Only the reader scrolls up; our own scrolling only ever moves down.
   const onScroll = () => {

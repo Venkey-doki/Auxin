@@ -267,8 +267,12 @@ function FlowMapToolbar({
 /** Replays a trace's hops one by one (amber, then green or red) whenever a new trace lands. */
 function useHopReplay(trace: TraceResult | undefined) {
   const [shown, setShown] = useState(0);
-  useEffect(() => {
+  const [replaying, setReplaying] = useState(trace);
+  if (replaying !== trace) {
+    setReplaying(trace);
     setShown(0);
+  }
+  useEffect(() => {
     if (!trace) return;
     let i = 0;
     const t = window.setInterval(() => {

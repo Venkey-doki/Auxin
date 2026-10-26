@@ -70,7 +70,7 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
   };
 
   // Save anything pending when the panel closes.
-  useEffect(() => () => flush(), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => flush(), []);
 
   useEffect(() => {
     const load = (only?: Set<Section>) => {
@@ -98,7 +98,7 @@ export function EnvPanel({ onClose }: { onClose: () => void }) {
       (["vars", "secrets", "urls", "insecure", "network", "brokers"] as Section[]).filter((k) => !(k in pendingEdits.current)),
     );
     load(untouched);
-  }, [name, env]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [name, env]);
 
   const persist = (next: Edits) => {
     pendingFor.current = name;

@@ -203,10 +203,8 @@ export function Json({ text }: { text: string }) {
   if (text.length > 200_000) return <>{text}</>;
   const out: ReactNode[] = [];
   let last = 0;
-  let m: RegExpExecArray | null;
   let k = 0;
-  JSON_TOKEN.lastIndex = 0;
-  while ((m = JSON_TOKEN.exec(text))) {
+  for (const m of text.matchAll(JSON_TOKEN)) {
     if (m.index > last) out.push(text.slice(last, m.index));
     if (m[1] && m[2])
       out.push(
@@ -233,7 +231,7 @@ export function Json({ text }: { text: string }) {
           {m[4]}
         </span>,
       );
-    last = JSON_TOKEN.lastIndex;
+    last = m.index + m[0].length;
   }
   out.push(text.slice(last));
   return <>{out}</>;

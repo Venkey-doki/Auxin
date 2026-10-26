@@ -22,10 +22,9 @@ import { Button, cx, Field, IconButton, inputClass, Seg, SegButton, Switch, TopB
 
 export function ServiceView({ id }: { id: string }) {
   const service = useStore((s) => selectServices(s).find((x) => x.id === id));
-  const [tab, setTab] = useState<"logs" | "settings">("logs");
   const hasCommand = !!service?.command.trim();
-
-  useEffect(() => setTab(hasCommand ? "logs" : "settings"), [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // App renders this with key={id}, so each service starts on its own first tab.
+  const [tab, setTab] = useState<"logs" | "settings">(hasCommand ? "logs" : "settings");
 
   if (!service) return <div className="grid flex-1 place-items-center text-fg-3">This service is no longer in the workspace.</div>;
 
@@ -153,7 +152,12 @@ function ServiceSettings({ service }: { service: Service }) {
   const [justSaved, setJustSaved] = useState(false);
   const commandDirty = command.trim() !== service.command.trim();
 
-  useEffect(() => setCommand(service.command), [service.id, service.command]);
+  // A saved command (here, or in another window) replaces the draft.
+  const [savedCommand, setSavedCommand] = useState(service.command);
+  if (savedCommand !== service.command) {
+    setSavedCommand(service.command);
+    setCommand(service.command);
+  }
   useEffect(() => {
     if (!justSaved) return;
     const t = window.setTimeout(() => setJustSaved(false), 4000);

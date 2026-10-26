@@ -36,7 +36,7 @@ export function HistoryPanel({ path, onClose }: { path: string; onClose: () => v
 
   const load = () => void loadHistory(path).then(setRuns);
   // Reload once a finished run's history file is written.
-  useEffect(load, [path, run?.historySavedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(load, [path, run?.historySavedAt]);
 
   return (
     <aside className="flex w-[380px] flex-none flex-col border-l border-line bg-surface" aria-label="Run history">

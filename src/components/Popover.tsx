@@ -27,6 +27,8 @@ export function Popover({
     let left = align === "end" ? r.right - w : r.left;
     left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
     const top = Math.min(r.bottom + 4, window.innerHeight - 120);
+    // Measured from the DOM before paint: the case layout effects are for.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPos({ top, left });
   }, [open, anchor, align, width]);
 

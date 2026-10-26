@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Maximize2, Minimize2, Play, RotateCw, Square, X } from "lucide-react";
-import { useEffect, useRef, type ButtonHTMLAttributes } from "react";
+import { useState, type ButtonHTMLAttributes } from "react";
 import type { Service } from "../lib/types";
 import { formatUptime, SERVICE_COLORS } from "../lib/util";
 import { isLive, navigate, restartService, startService, stopService, useStore } from "../state/store";
@@ -44,12 +44,11 @@ export function Ticket({
   const live = isLive(rt);
   const port = rt?.port ?? (live ? undefined : (service.portHint ?? undefined));
   const lg = size === "lg";
-  // Stamp only when the state actually changes, never on mount.
-  const prev = useRef(shown);
-  const changed = prev.current !== shown;
-  useEffect(() => {
-    prev.current = shown;
-  }, [shown]);
+  // Stamp only when the state actually changes, never on mount. The stamp remounts
+  // per state (key={shown}), so the class only has to be there once it has changed.
+  const [mountedAs, setMountedAs] = useState<typeof shown | null>(shown);
+  if (mountedAs !== null && mountedAs !== shown) setMountedAs(null);
+  const changed = mountedAs === null;
 
   const meta: string[] = [];
   if (service.framework) meta.push(service.framework);

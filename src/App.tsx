@@ -57,7 +57,7 @@ export default function App() {
       <main className="flex min-h-0 min-w-0 flex-col">
         <Boundary key={JSON.stringify(view)}>
           {view.type === "overview" && <Overview />}
-          {view.type === "service" && <ServiceView id={view.id} />}
+          {view.type === "service" && <ServiceView key={view.id} id={view.id} />}
           {view.type === "group" && <GroupView id={view.id} />}
           {view.type === "flow" && <FlowScreen path={view.id} />}
           {view.type === "map" && <MapScreen />}

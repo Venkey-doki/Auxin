@@ -556,7 +556,8 @@ export async function runFlow(path: string, opts: { replay?: RunRecord; env?: st
       return o;
     },
     notRun: (step, why) => {
-      const o: StepOutcome = { ...sliceOf(root)?.responses[rk(path, step.id)]!, state: why };
+      // Every step got a "queued" outcome when the run started.
+      const o = { ...sliceOf(root)?.responses[rk(path, step.id)], state: why } as StepOutcome;
       setOutcome(root, rk(path, step.id), o);
       return o;
     },

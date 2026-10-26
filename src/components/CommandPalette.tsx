@@ -5,7 +5,7 @@ import { activeWorkspace, isLive, navigate, selectServices, setPalette, startSer
 import { allSteps } from "../flows/model";
 import { runFlow } from "../flows/runner";
 import { useFlows } from "../flows/store";
-import { shownStatus, STATUS_TEXT, StatusMark } from "./status";
+import { shownStatus, STATUS_TEXT, StatusMark, useNow } from "./status";
 import { cx } from "./ui";
 
 interface Item {
@@ -27,15 +27,18 @@ export function CommandPalette() {
   const [sel, setSel] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  // Each time it opens, start from an empty search.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) {
       setQ("");
       setSel(0);
     }
-  }, [open]);
+  }
 
+  const now = useNow(1000);
   const items = useMemo<Item[]>(() => {
-    const now = Date.now();
     const out: Item[] = [];
     for (const s of services) {
       const st = shownStatus(runtime[s.id], now);
@@ -73,7 +76,7 @@ export function CommandPalette() {
       out.push({ id: "g" + g.id, label: g.name, hint: "Open group", icon: <Rows3 />, run: () => navigate({ type: "group", id: g.id }) });
     }
     return out;
-  }, [services, runtime, ws, flows]);
+  }, [services, runtime, ws, flows, now]);
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();

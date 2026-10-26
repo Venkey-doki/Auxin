@@ -395,6 +395,8 @@ export function installMockBackend() {
 
   mockIPC(
     (cmd, args) => {
+      // Dev-only stand-in for the Rust commands; each case reads the fields its command takes.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const a = (args ?? {}) as Record<string, any>;
       switch (cmd) {
         case "auxin_list":

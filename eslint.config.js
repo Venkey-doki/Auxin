@@ -12,6 +12,10 @@ export default defineConfig([
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, tseslint.configs.recommended, reactHooks.configs.flat.recommended],
     languageOptions: { globals: globals.browser },
+    rules: {
+      // `_name` marks a value left unused on purpose; `{ dropped: _, ...rest }` omits a key.
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", ignoreRestSiblings: true }],
+    },
   },
   prettier,
 ]);

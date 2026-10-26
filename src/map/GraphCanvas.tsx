@@ -7,7 +7,7 @@
  */
 import { Graph, layout } from "@dagrejs/dagre";
 import { AlertTriangle, Check, Code2, Database, Globe, Inbox, Maximize, Minus, Monitor, Plus, Server, Zap, type LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import { cx, IconButton } from "../components/ui";
 import { SERVICE_COLORS } from "../lib/util";
 import type { NodeKind } from "./model";
@@ -125,9 +125,8 @@ export function GraphCanvas({
 
   // Fit on open and when nodes come or go, never on routine re-renders (log
   // lines, drags), so the user's pan and zoom stick.
-  const fitRef = useRef(fit);
-  fitRef.current = fit;
-  useLayoutEffect(() => fitRef.current(), [nodes.length, layoutKey]);
+  const fitNow = useEffectEvent(fit);
+  useLayoutEffect(() => fitNow(), [nodes.length, layoutKey]);
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -138,7 +137,7 @@ export function GraphCanvas({
       if (el.clientWidth === w && el.clientHeight === h) return;
       w = el.clientWidth;
       h = el.clientHeight;
-      fitRef.current();
+      fitNow();
     });
     ro.observe(el);
     return () => ro.disconnect();

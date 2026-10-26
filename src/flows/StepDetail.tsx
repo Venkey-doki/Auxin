@@ -386,16 +386,18 @@ export function OnFailureEditor({ step, onChange }: { step: FlowStep; onChange: 
 function BodyEditor({ path, step, invalid }: { path: string; step: FlowStep; invalid?: string }) {
   const root = useFlows((s) => s.root);
   const patchBody = (p: Partial<FlowStep["body"]>) => updateStep(path, step.id, { body: { ...step.body, ...p } });
-  const [filePreview, setFilePreview] = useState<{ text: string; size: number } | string | null>(null);
-
+  // Files outside the workspace are never sent, so they aren't read for a preview either.
+  const previewPath = step.body.kind === "file" && step.body.file && root && !outsideWorkspace(step.body.file) ? `${root}/${step.body.file}` : null;
+  const [preview, setPreview] = useState<{ path: string; value: { text: string; size: number } | string } | null>(null);
   useEffect(() => {
-    // Files outside the workspace are never sent, so they aren't read for a preview either.
-    if (step.body.kind !== "file" || !step.body.file || !root || outsideWorkspace(step.body.file)) return setFilePreview(null);
+    if (!previewPath) return;
     api
-      .filePreview(`${root}/${step.body.file}`)
-      .then(([text, size]) => setFilePreview({ text, size }))
-      .catch((e) => setFilePreview(String(e)));
-  }, [step.body.kind, step.body.file, root]);
+      .filePreview(previewPath)
+      .then(([text, size]) => setPreview({ path: previewPath, value: { text, size } }))
+      .catch((e) => setPreview({ path: previewPath, value: String(e) }));
+  }, [previewPath]);
+  // A preview read for another file (or a slower, earlier read) is never shown.
+  const filePreview = preview && preview.path === previewPath ? preview.value : null;
 
   const chooseFile = async () => {
     const picked = await openDialog({ multiple: false, directory: false, defaultPath: root ?? undefined, title: "Choose a body file" });

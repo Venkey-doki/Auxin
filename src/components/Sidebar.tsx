@@ -31,7 +31,6 @@ import {
   openWorkspace,
   hideService,
   rescan,
-  selectHiddenServices,
   selectServices,
   setPalette,
   startService,
@@ -332,7 +331,7 @@ function HiddenServices() {
   // Select stable inputs; deriving a fresh array inside the selector re-renders forever.
   const detected = useStore((s) => s.detected);
   const hiddenIds = useStore((s) => activeWorkspace(s)?.hidden);
-  const hidden = useMemo(() => selectHiddenServices({ ...useStore.getState(), detected }), [detected, hiddenIds]);
+  const hidden = useMemo(() => detected.filter((d) => hiddenIds?.includes(d.id)), [detected, hiddenIds]);
   const [isOpen, setOpen] = useState(false);
   const ref = useRef<HTMLButtonElement>(null);
   if (!hidden.length) return null;

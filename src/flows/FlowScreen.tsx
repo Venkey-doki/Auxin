@@ -80,24 +80,22 @@ export function FlowScreen({ path }: { path: string }) {
   useStore((s) => s.runtime); // service ports feed {{service}} variables, and so the issues below
   const root = useFlows((s) => s.root);
   const openKey = `${root}\u0000${path}`;
-  const [openId, setOpen] = useState<string | null>(() => openSteps.get(openKey) ?? null);
+  const steps = useMemo(() => (doc ? allSteps(doc.steps) : []), [doc]);
+  // Which request is open lives per flow (openSteps), so switching flows or workspaces
+  // shows what was open in that one. A flow shown for the first time opens its first request.
+  const [, rerender] = useState(0);
+  const openId = openSteps.has(openKey) ? (openSteps.get(openKey) ?? null) : (steps[0]?.id ?? null);
   const setOpenId = (id: string | null) => {
     openSteps.set(openKey, id);
-    setOpen(id);
+    rerender((n) => n + 1);
   };
-  // The screen stays mounted when you switch flows or workspaces; show what was open in this one.
-  useEffect(() => setOpen(openSteps.get(openKey) ?? null), [openKey]);
+  // Pin that first request, so a step added above it later doesn't take its place.
+  useEffect(() => {
+    if (!openSteps.has(openKey) && steps[0]) openSteps.set(openKey, steps[0].id);
+  }, [steps, openKey]);
   const [panel, setPanel] = useState<"env" | "history" | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [canvasH, setCanvasH] = useState(readCanvasH);
-  const steps = useMemo(() => (doc ? allSteps(doc.steps) : []), [doc]);
-
-  // Open the first request the first time a flow is shown; after that rows stay as the user leaves them,
-  // also when they come back to it from another flow or workspace.
-  useEffect(() => {
-    if (openSteps.has(openKey) || !steps[0]) return;
-    setOpenId(steps[0].id);
-  }, [steps, openKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ⌘↵ sends the open request, ⌘⇧↵ runs the flow.
   useEffect(() => {
@@ -118,7 +116,9 @@ export function FlowScreen({ path }: { path: string }) {
 
   // While a run is going, keep the request being sent open (the first, when several are in flight).
   const activeStep = run?.status === "running" ? steps.find((s) => ["sending", "polling"].includes(responses[rk(path, s.id)]?.state ?? "")) : undefined;
+  // Follows the run as it goes, an outside event, so it stays an effect.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (activeStep) setOpenId(activeStep.id);
   }, [activeStep?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

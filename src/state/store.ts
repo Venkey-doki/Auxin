@@ -105,11 +105,6 @@ export function selectServices(s: State): Service[] {
   return cacheVal;
 }
 
-export function selectHiddenServices(s: State): DetectedService[] {
-  const ws = activeWorkspace(s);
-  return ws ? s.detected.filter((d) => ws.hidden.includes(d.id)) : [];
-}
-
 function portFromCommand(cmd: string): number | null {
   const m = /(?:--port|-p|PORT=)[\s=]?(\d{2,5})/.exec(cmd);
   return m ? Number(m[1]) : null;
@@ -221,7 +216,7 @@ export async function boot() {
       const parsed = JSON.parse(raw) as Config;
       if (parsed?.version === 1) set({ config: migrateLegacyFlows(parsed) });
     }
-  } catch (e) {
+  } catch {
     toast("error", "Settings file was unreadable", "Starting with a fresh configuration.");
   }
 
@@ -409,7 +404,7 @@ export async function stopService(id: string) {
   if (!r || !isLive(r)) return;
   try {
     await api.stop(id);
-  } catch (e) {
+  } catch {
     // Already gone: settle the UI.
     set((s) => ({ runtime: { ...s.runtime, [id]: { ...s.runtime[id], status: "stopped" } } }));
   }
