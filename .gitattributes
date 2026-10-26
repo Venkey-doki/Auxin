@@ -1,0 +1,8 @@
+# Keep LF everywhere, so Windows checkouts don't produce whole-file diffs.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.woff2 binary

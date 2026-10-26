@@ -1,0 +1,9 @@
+dist
+coverage
+node_modules
+package-lock.json
+src-tauri/target
+src-tauri/gen
+fixtures/**/node_modules
+# Prose is wrapped by hand.
+*.md
