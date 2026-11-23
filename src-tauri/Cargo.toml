@@ -29,7 +29,7 @@ notify = "8"
 base64 = "0.22"
 tokio = { version = "1", features = ["sync", "time", "net"] }
 serde_yaml_ng = "0.10"
-lapin = { version = "=4.12.1", default-features = false, features = ["tokio", "rustls--ring", "rustls-platform-verifier"] }
+lapin = { version = "=4.12.3", default-features = false, features = ["tokio", "rustls--ring", "rustls-platform-verifier"] }
 # No zstd: rskafka 0.6 needs zstd 0.13, which has known vulnerabilities (RUSTSEC-2026-0391,
 # -0398, -0403; fixed in zstd 0.14.3). Turn it back on once rskafka moves to a fixed zstd.
 rskafka = { version = "=0.6.0", default-features = false, features = ["compression-gzip", "compression-lz4", "compression-snappy"] }
